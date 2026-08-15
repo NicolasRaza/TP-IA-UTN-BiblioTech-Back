@@ -6,39 +6,125 @@ Backend del Sistema de Gestión de Bibliotecas (SGB).
 
 - Python 3.11+
 - PostgreSQL 14+
-- Tesseract OCR (opcional, para reconocimiento de fotos)
 
-## Instalación
+## Instalación paso a paso
+
+### 1. Entrar al proyecto y crear el entorno virtual
 
 ```bash
-# 1. Clonar y entrar al proyecto
 cd sgb_backend
+python3 -m venv venv
+source venv/bin/activate
+```
 
-# 2. Crear entorno virtual
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+El prompt debe mostrar `(venv)` al inicio. Hay que activarlo cada vez que se abre una terminal nueva.
 
-# 3. Instalar dependencias
+### 2. Instalar dependencias
+
+```bash
 pip install -r requirements.txt
+```
 
-# 4. Configurar variables de entorno
+### 3. Configurar PostgreSQL
+
+Primero instalá PostgreSQL si no lo tenés:
+
+```bash
+# Ubuntu/Debian
+sudo apt install postgresql
+
+# macOS
+brew install postgresql
+```
+
+Luego creá el usuario y la base de datos (solo la primera vez):
+
+```bash
+sudo -u postgres psql
+```
+
+Dentro de psql, ejecutá:
+
+```sql
+CREATE USER sgb_user WITH PASSWORD 'sgb123';
+CREATE DATABASE sgb_db OWNER sgb_user;
+\q
+```
+
+### 4. Configurar el archivo .env
+
+```bash
 cp .env.example .env
-# Editar .env con tus credenciales de PostgreSQL y claves de API
+```
 
-# 5. Levantar el servidor
+Abrí el archivo `.env` y dejalo así (con los datos que creaste en el paso anterior):
+
+```
+DATABASE_URL=postgresql+asyncpg://sgb_user:sgb123@localhost:5432/sgb_db
+SECRET_KEY=cualquier-cadena-larga-y-aleatoria-aca-123456
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=60
+
+FIREBASE_CREDENTIALS_PATH=
+GOOGLE_BOOKS_API_KEY=
+
+MAX_DIAS_PRESTAMO_ADULTO=14
+MAX_DIAS_PRESTAMO_INFANTIL=7
+MAX_DIAS_PRESTAMO_DOCENTE=30
+MAX_PRESTAMOS_SIMULTANEOS=3
+HORAS_RESERVA_DISPONIBLE=48
+```
+
+> Las variables FIREBASE y GOOGLE_BOOKS se pueden dejar vacías para desarrollo.
+
+### 5. Crear el usuario administrador
+
+```bash
+python cargausuario.py
+```
+
+Deberías ver:
+```
+✓ Usuario administrador creado
+  Email:    admin@biblioteca.com
+  Password: admin123
+  Rol:      administrador
+```
+
+### 6. Levantar el servidor
+
+```bash
 uvicorn main:app --reload
 ```
 
-La API queda disponible en `http://localhost:8000`
+La API queda disponible en `http://localhost:8000`  
 Documentación interactiva (Swagger): `http://localhost:8000/docs`
 
-## Estructura
+### 7. Probar el login en Swagger
+
+1. Entrá a `http://localhost:8000/docs`
+2. Buscá `POST /api/v1/auth/login`
+3. Ingresá:
+```json
+{
+  "email": "admin@biblioteca.com",
+  "password": "admin123"
+}
+```
+4. Copiá el `access_token` de la respuesta
+5. Hacé clic en **Authorize** (arriba a la derecha) y pegá el token
+6. Todos los endpoints quedan habilitados
+
+---
+
+## Estructura del proyecto
 
 ```
 sgb_backend/
 ├── main.py                        # Punto de entrada FastAPI
 ├── requirements.txt
 ├── .env.example
+├── cargausuario.py                # Script para crear el primer administrador
 └── app/
     ├── api/v1/
     │   ├── router.py              # Agrupa todos los routers
@@ -109,7 +195,7 @@ brew install tesseract tesseract-lang
 Sin Tesseract instalado, el endpoint `/captura-ocr` devuelve campos vacíos
 y el bibliotecario completa los datos manualmente (modo fallback offline).
 
-## Firebase (notificaciones push)
+## Firebase (notificaciones push, opcional)
 
 1. Crear proyecto en Firebase Console
 2. Descargar `firebase_credentials.json` (Service Account)
