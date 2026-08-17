@@ -147,6 +147,7 @@ async def captura_ocr(
         autores=_val("autor") or None,
         editorial=_val("editorial") or None,
         anio_edicion=_val("anio") or None,
+        lugar_edicion=_val("lugar") or None,
         sinopsis=_val("sinopsis") or None,
         genero=_val("genero") or None,
         portada_url=_val("portada") or None,

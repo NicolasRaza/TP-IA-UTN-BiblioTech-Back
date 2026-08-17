@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
     FIREBASE_CREDENTIALS_PATH: Optional[str] = None
-    GOOGLE_BOOKS_API_KEY: Optional[str] = None
+    GOOGLE_BOOKS_API_KEY: Optional[str] = "AIzaSyC4NXd1no02chR0VjWvjeLRFIxAbvq2V2Y"
 
     # Plazos parametrizables por categoría
     MAX_DIAS_PRESTAMO_ADULTO: int = 14
