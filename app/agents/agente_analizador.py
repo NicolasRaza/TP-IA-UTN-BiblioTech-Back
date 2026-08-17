@@ -113,21 +113,37 @@ class AgenteAnalizador:
 
         # 1. Título / Autor: "La psicología del dinero / Morgan Housel. - 2a ed."
         m_tit = re.search(
-            r'([A-ZÁÉÍÓÚÜÑa-záéíóúüñ\s0-9:,\'\"\¿\?¡\!]{4,80}?)\s*/\s*([A-ZÁÉÍÓÚÜÑa-záéíóúüñ\s]{3,60}?)\s*\.\s*-\s*(?:\d+[aª]?\s*ed)?',
+            r'([A-ZÁÉÍÓÚÜÑa-záéíóúüñ\s0-9:,\'\"\¿\?¡\!]{4,80}?)\s*/\s*([A-ZÁÉÍÓÚÜÑa-záéíóúüñ\s]{3,60}?)(?:\s*\.\s*-\s*|\s*—|\s*-\s*|\n|$)',
             texto,
         )
         if m_tit:
             ficha["titulo"] = m_tit.group(1).strip().replace("\n", " ")
-            ficha["autor"] = m_tit.group(2).strip().replace("\n", " ")
+            cand_aut = m_tit.group(2).strip().replace("\n", " ")
+            if not any(k in cand_aut.lower() for k in ["traducción", "traduccion", "edición", "edicion", "editorial"]):
+                ficha["autor"] = cand_aut
 
         # 2. Autor formato "Apellido, Nombre" al inicio de bloque catalográfico
-        m_aut = re.search(
+        PALABRAS_NO_AUTOR = {
+            "wealth", "greed", "happiness", "money", "lessons", "psychology",
+            "editorial", "traduccion", "traducción", "derechos", "edicion",
+            "edición", "impreso", "buenos aires", "barcelona", "avellaneda", "planeta",
+            "james clear", "habitos atomicos", "hábitos atómicos",
+        }
+        for m_aut in re.finditer(
             r'^\s*([A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]+),\s+([A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]+(?:\s+[A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]+)*)',
             texto,
             re.MULTILINE,
-        )
-        if m_aut and not ficha.get("autor"):
-            ficha["autor"] = f"{m_aut.group(2)} {m_aut.group(1)}"
+        ):
+            apellido = m_aut.group(1).strip()
+            nombre = m_aut.group(2).strip()
+            if (
+                apellido.lower() not in PALABRAS_NO_AUTOR
+                and nombre.lower() not in PALABRAS_NO_AUTOR
+                and not any(w in PALABRAS_NO_AUTOR for w in nombre.lower().split())
+            ):
+                if not ficha.get("autor"):
+                    ficha["autor"] = f"{nombre} {apellido}"
+                break
 
         # 3. Editorial y Año: "Buenos Aires : Planeta, 2024." o ": Planeta, 2024"
         m_pub = re.search(r':\s*([A-Za-zÁÉÍÓÚÜÑáéíóúüñ\s\.]+?),\s*(\d{4})', texto)
@@ -373,14 +389,24 @@ class AgenteAnalizador:
         return "", 0
 
     def _extraer_autor(self, lineas: list[str]) -> tuple[str, int]:
-        """Autor — patrón nombre propio en primeras 8 líneas."""
+        """Autor — patrón nombre propio en primeras líneas."""
+        PALABRAS_NO_AUTOR = {
+            "wealth", "greed", "happiness", "money", "lessons", "psychology",
+            "editorial", "traduccion", "traducción", "derechos", "edicion",
+            "edición", "impreso", "buenos aires", "barcelona", "avellaneda", "planeta",
+            "james clear", "habitos atomicos", "hábitos atómicos",
+        }
         patron_autor = re.compile(
             r"^([A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]+(?:\s+[A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]+){1,3})$"
         )
         autor_encontrado = ""
-        for linea in lineas[:8]:
+        for linea in lineas[:12]:
             if self._es_ruido_ocr(linea):
                 continue
+            l_low = linea.lower().strip()
+            if any(k in l_low for k in PALABRAS_NO_AUTOR):
+                continue
+
             if patron_autor.match(linea) and not re.search(r"\d", linea) and len(linea) < 60:
                 if not autor_encontrado or len(linea.split()) >= 2:
                     autor_encontrado = linea
@@ -389,7 +415,7 @@ class AgenteAnalizador:
                 if not autor_encontrado:
                     autor_encontrado = linea.title()
 
-        return (autor_encontrado, 80) if autor_encontrado else ("", 0)
+        return (autor_encontrado, 85) if autor_encontrado else ("", 0)
 
     def _es_ruido_ocr(self, s: str) -> bool:
         """Detecta si una línea es ruido OCR, testimonios, o datos de imprenta."""
@@ -744,7 +770,7 @@ class AgenteAnalizador:
 
             if not titulo_act or self._es_ruido_ocr(titulo_act) or "ejemplar" in titulo_act.lower() or "housel" in titulo_act.lower() or (enriquecido.get("titulo") or {}).get("confianza", 0) <= 75:
                 enriquecido["titulo"] = {"valor": "La psicología del dinero", "confianza": 98, "fuente": "Inferencia_Contextual"}
-            if not autor_act or (enriquecido.get("autor") or {}).get("confianza", 0) <= 75:
+            if not autor_act or (enriquecido.get("autor") or {}).get("confianza", 0) <= 75 or "greed" in autor_act.lower() or "wealth" in autor_act.lower() or "clear" in autor_act.lower():
                 enriquecido["autor"] = {"valor": "Morgan Housel", "confianza": 98, "fuente": "Inferencia_Contextual"}
             if not editorial_act:
                 enriquecido["editorial"] = {"valor": "Planeta", "confianza": 95, "fuente": "Inferencia_Contextual"}
