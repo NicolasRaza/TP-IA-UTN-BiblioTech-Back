@@ -421,3 +421,45 @@ async def indicadores(
         top_titulos_prestados=top_titulos,
         top_lectores_activos=top_lectores,
     )
+
+
+# ── Recomendaciones (AgenteAprendizaje) ───────────────────────────────────
+
+@router.get("/recomendaciones", summary="Recomendaciones personalizadas para el lector autenticado")
+async def recomendaciones(
+    usuario: Usuario = Depends(get_usuario_actual),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Usa el AgenteAprendizaje para generar recomendaciones personalizadas.
+    Cold start (≤5 préstamos): 100% popularidad.
+    Normal: 70% historial + 30% popularidad.
+    """
+    from app.agents.agente_aprendizaje import AgenteAprendizaje
+    from app.agents.repositorios_impl import construir_repositorio
+
+    lector_result = await db.execute(select(Lector).where(Lector.usuario_id == usuario.id))
+    lector = lector_result.scalar_one_or_none()
+    if not lector:
+        raise HTTPException(status_code=404, detail="Perfil de lector no encontrado")
+
+    repo = construir_repositorio(db)
+    agente = AgenteAprendizaje(repo)
+    libros = agente.recomendar_para_lector(str(lector.id))
+    return libros
+
+
+@router.get("/dashboard/resumen-ia", summary="Resumen ejecutivo generado por AgenteEvaluador")
+async def resumen_ia(
+    _: Usuario = Depends(require_bibliotecario),
+    db: AsyncSession = Depends(get_db),
+):
+    """Genera un resumen en lenguaje natural con los indicadores de uso (Ollama opcional)."""
+    from app.agents.agente_evaluador import AgenteEvaluador
+    from app.agents.repositorios_impl import construir_repositorio
+
+    repo = construir_repositorio(db)
+    evaluador = AgenteEvaluador(repo)
+    indicadores = evaluador.calcular_indicadores()
+    resumen = await evaluador.generar_resumen_con_ia(indicadores)
+    return {"indicadores": indicadores, "resumen": resumen}

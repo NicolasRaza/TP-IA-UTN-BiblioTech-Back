@@ -9,8 +9,9 @@ from app.schemas.libro import (
     TituloCreate, TituloUpdate, TituloValidar,
     TituloResponse, EjemplarCreate, EjemplarResponse, OCRResultado,
 )
-from app.agents.capture import agente_captura
-from app.agents.analyzer import agente_analizador
+from app.agents.agente_captura import AgenteCaptura
+from app.agents.agente_analizador import AgenteAnalizador
+from app.agents.repositorios_impl import RepoConfig
 
 router = APIRouter(prefix="/catalogo", tags=["Catálogo"])
 
@@ -107,16 +108,54 @@ async def captura_ocr(
     Agente Analizador: estructura los campos y enriquece con datos de internet por ISBN.
     El bibliotecario recibe la ficha sugerida para revisar y confirmar antes de guardar.
     """
-    tapa_bytes = await foto_tapa.read()
-    ficha_bytes = await foto_ficha.read()
+    tapa_bytes = await foto_tapa.read() if foto_tapa else b""
+    contratapa_bytes = await foto_contratapa.read() if foto_contratapa else b""
+    ficha_bytes = await foto_ficha.read() if foto_ficha else b""
 
     # Agente de Captura (OCR)
-    texto_crudo = await agente_captura.procesar_fotos(tapa_bytes, ficha_bytes)
+    captura = AgenteCaptura()
+    resultado_tapa = await captura.procesar_imagen_ocr(tapa_bytes) if tapa_bytes else {"texto_crudo": "", "isbn_detectado": None}
+    resultado_contratapa = await captura.procesar_imagen_ocr(contratapa_bytes) if contratapa_bytes else {"texto_crudo": "", "isbn_detectado": None}
+    resultado_ficha = await captura.procesar_imagen_ocr(ficha_bytes) if ficha_bytes else {"texto_crudo": "", "isbn_detectado": None}
+
+    textos = [
+        resultado_ficha["texto_crudo"],
+        resultado_tapa["texto_crudo"],
+        resultado_contratapa["texto_crudo"],
+    ]
+    texto_combinado = "\n\n".join(t for t in textos if t)
+    isbn_detectado = (
+        resultado_ficha.get("isbn_detectado")
+        or resultado_tapa.get("isbn_detectado")
+        or resultado_contratapa.get("isbn_detectado")
+        or ""
+    )
 
     # Agente Analizador (estructuración + enriquecimiento por ISBN)
-    resultado = await agente_analizador.analizar_y_enriquecer(texto_crudo)
+    analizador = AgenteAnalizador(config_repo=RepoConfig())
+    datos_ocr = analizador.procesar_texto_ocr(texto_combinado)
+    resultado_enriq = await analizador.enriquecer(isbn_detectado, datos_ocr, texto_combinado)
 
     # Verificar si el ISBN ya existe en el catálogo
+    # Construir OCRResultado desde el dict devuelto por el nuevo AgenteAnalizador
+    def _val(campo): return (resultado_enriq.get(campo) or {}).get("valor", "") or ""
+    def _conf(campo): return (resultado_enriq.get(campo) or {}).get("confianza", 0) or 0
+    from app.schemas.libro import OCRResultado
+    resultado = OCRResultado(
+        isbn=_val("isbn") or None,
+        titulo=_val("titulo") or None,
+        autores=_val("autor") or None,
+        editorial=_val("editorial") or None,
+        anio_edicion=_val("anio") or None,
+        lugar_edicion=_val("lugar") or None,
+        sinopsis=_val("sinopsis") or None,
+        genero=_val("genero") or None,
+        portada_url=_val("portada") or None,
+        paginas=int(_val("paginas")) if _val("paginas").isdigit() else None,
+        confianza_isbn=_conf("isbn") / 100,
+        confianza_titulo=_conf("titulo") / 100,
+        confianza_autores=_conf("autor") / 100,
+    )
     if resultado.isbn:
         existe = await db.execute(select(Titulo).where(Titulo.isbn == resultado.isbn))
         titulo_existente = existe.scalar_one_or_none()
