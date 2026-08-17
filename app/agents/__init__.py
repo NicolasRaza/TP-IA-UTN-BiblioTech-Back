@@ -11,6 +11,7 @@ from .agente_evaluador import AgenteEvaluador
 from .agente_planificador import AgentePlanificador
 from .agente_aprendizaje import AgenteAprendizaje
 from .repositorios_impl import construir_repositorio
+from .planner import agente_planificador, PlannerService
 
 __all__ = [
     "AgenteCaptura",
@@ -19,4 +20,6 @@ __all__ = [
     "AgentePlanificador",
     "AgenteAprendizaje",
     "construir_repositorio",
+    "agente_planificador",
+    "PlannerService",
 ]
