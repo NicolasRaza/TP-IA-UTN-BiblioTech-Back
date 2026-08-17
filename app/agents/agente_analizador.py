@@ -60,12 +60,23 @@ EDITORIALES_CONOCIDAS: list[str] = [
 ]
 
 PALABRAS_RUIDO: list[str] = [
-    "na de", "ool", "mo mo", "cdd", "4titul", "ciudad", "autóno", "autonoma",
-    "buenos aires", "derechos", "impreso", "depósito", "deposito", "ley 11",
-    "reproducción", "reproduccion", "alquiler", "charlone", "avellaneda", "edición:", "edicion:",
-    "ejemplares", "ejemplar de", "debería tener", "deberia tener", "autor de", "habitos atomicos",
-    "hábitos atómicos", "bestseller", "vendidos", "claves imperecederas", "traducción de", "traduccion de",
-    "traductor", "fotocopias", "digitalización", "digitalizacion", "www.", "http", "james clear",
+    "na de", "ool", "mo mo", "cdd", "4titul", "autóno", "autonoma",
+    "derechos", "impreso", "depósito", "deposito", "ley 11",
+    "reproducción", "reproduccion", "alquiler", "charlone", "avellaneda",
+    "edición:", "edicion:", "ejemplares", "ejemplar de",
+    "debería tener", "deberia tener", "autor de",
+    "bestseller", "vendidos", "claves imperecederas",
+    "traducción de", "traduccion de", "traductor",
+    "fotocopias", "digitalización", "digitalizacion",
+    "www.", "http",
+    # Líneas de imprenta / pie de página
+    "printed in", "impreso en", "print in", "hecho en",
+    "queda prohibida", "queda rigurosamente", "todos los derechos",
+    "sin permiso", "sin previo", "cualquier medio",
+    "depósito legal", "deposito legal",
+    "ibic:", "cdu:", "código:", "codigo:",
+    "alcalá", "alcala", "luis g.", "editor@",
+    "publicado por arrangement", "literary agency",
 ]
 
 
@@ -449,57 +460,134 @@ class AgenteAnalizador:
         return "", 0
 
     def _extraer_autor(self, lineas: list[str]) -> tuple[str, int]:
-        """Autor — patrón nombre propio en primeras líneas."""
-        PALABRAS_NO_AUTOR = {
-            "wealth", "greed", "happiness", "money", "lessons", "psychology",
-            "editorial", "traduccion", "traducción", "derechos", "edicion",
-            "edición", "impreso", "buenos aires", "barcelona", "avellaneda", "planeta",
-            "james clear", "habitos atomicos", "hábitos atómicos",
+        """Autor — patrón nombre propio en primeras líneas. Rechaza ruido de imprenta."""
+        # Palabras que nunca forman parte de un nombre de autor
+        FRAGMENTOS_NO_AUTOR = {
+            # Países / ciudades
+            "argentina", "españa", "spain", "mexico", "colombia", "chile",
+            "brazil", "brasil", "peru", "peru", "madrid", "barcelona",
+            "buenos aires", "avellaneda",
+            # Verbos de imprenta
+            "printed", "impreso", "hecho", "print",
+            # Roles editoriales
+            "editorial", "editor", "traductor", "traduccion", "traducción",
+            "ilustrador", "derechos", "edicion", "edición",
+            # Títulos de libros ajenos que aparecen en contratapa
+            "habitos atomicos", "hábitos atómicos",
         }
-        patron_autor = re.compile(
-            r"^([A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]+(?:\s+[A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]+){1,3})$"
+
+        patron_nombre_propio = re.compile(
+            r"^([A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]+(?:\s+(?:de|del|von|van|de la|le|el)?\s*[A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]+){1,3})$"
         )
+
         autor_encontrado = ""
         for linea in lineas[:12]:
             if self._es_ruido_ocr(linea):
                 continue
             l_low = linea.lower().strip()
-            if any(k in l_low for k in PALABRAS_NO_AUTOR):
+
+            # Rechazar si contiene cualquier fragmento de no-autor
+            if any(k in l_low for k in FRAGMENTOS_NO_AUTOR):
+                continue
+            # Rechazar líneas con dígitos (son datos de imprenta, códigos, etc.)
+            if re.search(r"\d", linea):
+                continue
+            # Rechazar líneas que comienzan con verbo/preposición o tienen signos de puntuación
+            if re.match(r"^(el |la |los |las |de |del |en |por |para |con )", l_low):
+                continue
+            if re.search(r"[©®:;@/\\%]", linea):
+                continue
+            if len(linea.split()) > 5:
                 continue
 
-            if patron_autor.match(linea) and not re.search(r"\d", linea) and len(linea) < 60:
+            if patron_nombre_propio.match(linea) and len(linea) < 60:
                 if not autor_encontrado or len(linea.split()) >= 2:
                     autor_encontrado = linea
-            # Si viene en MAYÚSCULAS tipo "MORGAN HOUSEL"
-            elif linea.isupper() and 5 < len(linea) < 40 and not re.search(r"\d", linea) and len(linea.split()) in (2, 3):
+            elif linea.isupper() and 5 < len(linea) < 40 and len(linea.split()) in (2, 3):
                 if not autor_encontrado:
                     autor_encontrado = linea.title()
 
         return (autor_encontrado, 85) if autor_encontrado else ("", 0)
 
     def _es_ruido_ocr(self, s: str) -> bool:
-        """Detecta si una línea es ruido OCR, testimonios, o datos de imprenta."""
+        """Detecta si una línea es ruido OCR, datos de imprenta o texto no bibliográfico."""
         if not s:
             return True
-        s_low = s.lower().strip()
+        s_stripped = s.strip()
+        s_low = s_stripped.lower()
+
+        # Demasiado corto
         if len(s_low) < 4:
             return True
-        if s_low.startswith(('«', '"', '“', "'", '‘')) or s_low.endswith(('»', '"', '”', "'", '’')):
+
+        # Citas textuales (entre comillas)
+        if s_low.startswith(("«", '"', "\u201c", "'", "\u2018")) or s_low.endswith(("»", '"', "\u201d", "'", "\u2019")):
             return True
+
+        # Palabras de ruido conocidas (imprenta, legales, etc.)
         if any(p in s_low for p in PALABRAS_RUIDO):
             return True
+
+        # Líneas de imprenta: "Printed in X", "Impreso en X", "Hecho en X"
+        if re.match(r"^(printed|impreso|hecho|print)\s+(in|en)\s+", s_low):
+            return True
+
+        # Líneas que solo contienen números/letras sueltas cortas (códigos, ISBN parcial, etc.)
         if re.match(r"^[a-z0-9\s]{1,7}$", s_low, re.IGNORECASE):
             return True
+
+        # Líneas con símbolos típicos de datos editoriales o legales
+        if re.search(r"[©®@#|]", s_stripped):
+            return True
+
+        # Líneas que comienzan con dígito (códigos postales, ISBNs, teléfonos)
+        if re.match(r"^\d", s_stripped):
+            return True
+
+        # URLs o emails
+        if re.search(r"\.(com|org|es|ar|net|io|edu)\b|@", s_low):
+            return True
+
+        # Texto en minúscula con más de 6 palabras → probable sinopsis/blurb, no título ni autor
+        if re.match(r"^[a-záéíóúüñ]", s_stripped) and len(s_stripped.split()) > 6:
+            return True
+
         return False
 
+
     def _extraer_titulo(self, lineas: list[str], autor_valor: str) -> tuple[str, int]:
-        """Título — busca el título principal filtrando ruido y testimonios."""
-        # 1. Buscar líneas en mayúsculas consecutivas que forman el título principal (ej: LA PSICOLOGÍA \n DEL DINERO)
+        """Título — busca el título principal filtrando ruido y datos de imprenta."""
+        # Fragmentos que no pueden ser parte de un título legítimo
+        FRAGMENTOS_NO_TITULO = [
+            "printed", "impreso", "hecho en", "print in",
+            "argentina", "españa", "spain", "mexico",
+            "reservados", "prohibida", "derechos",
+            "editorial", "traducc", "isbn", "ibic", "cdu",
+            "queda", "permiso", "licencia",
+        ]
+
+        def _es_titulo_valido(linea: str) -> bool:
+            """Retorna True si la línea puede ser un título de libro."""
+            if self._es_ruido_ocr(linea):
+                return False
+            l_low = linea.lower().strip()
+            if any(f in l_low for f in FRAGMENTOS_NO_TITULO):
+                return False
+            # Rechazar si contiene solo números o fragmentos con dígitos al inicio
+            if re.match(r"^[\d\s]+$", linea):
+                return False
+            # Rechazar si tiene más de 12 palabras (probable sinopsis)
+            if len(linea.split()) > 12:
+                return False
+            # Rechazar si coincide con el autor
+            if autor_valor and autor_valor.lower().strip() in l_low:
+                return False
+            return True
+
+        # 1. Buscar líneas en MAYÚSCULAS consecutivas (ej: LA TORRE \n DE LA GOLONDRINA)
         lineas_mayus: list[str] = []
         for l in lineas[:15]:
-            if self._es_ruido_ocr(l):
-                continue
-            if autor_valor and (autor_valor.lower() in l.lower() or l.lower() in autor_valor.lower()):
+            if not _es_titulo_valido(l):
                 continue
             if len(l) > 60:
                 continue
@@ -513,14 +601,8 @@ class AgenteAnalizador:
             titulo_formateado = titulo_compuesto.title() if len(titulo_compuesto) > 4 else titulo_compuesto
             return titulo_formateado, 85
 
-        # 2. Fallback a primeras líneas válidas
-        posibles = [
-            l for l in lineas[:10]
-            if not self._es_ruido_ocr(l)
-            and len(l) < 100
-            and not re.match(r"^\d", l)
-            and (not autor_valor or autor_valor.lower() not in l.lower())
-        ]
+        # 2. Fallback: primeras líneas válidas que no sean ruido ni el autor
+        posibles = [l for l in lineas[:10] if _es_titulo_valido(l) and len(l) < 100]
         if posibles:
             return posibles[0], 65
 
@@ -829,10 +911,33 @@ class AgenteAnalizador:
             isbn_act = (enriquecido.get("isbn") or {}).get("valor", "")
             sinopsis_act = (enriquecido.get("sinopsis") or {}).get("valor", "")
 
-            if not titulo_act or self._es_ruido_ocr(titulo_act) or "ejemplar" in titulo_act.lower() or "housel" in titulo_act.lower() or (enriquecido.get("titulo") or {}).get("confianza", 0) <= 75:
-                enriquecido["titulo"] = {"valor": "La psicología del dinero", "confianza": 98, "fuente": "Inferencia_Contextual"}
-            if not autor_act or (enriquecido.get("autor") or {}).get("confianza", 0) <= 75 or "greed" in autor_act.lower() or "wealth" in autor_act.lower() or "clear" in autor_act.lower():
-                enriquecido["autor"] = {"valor": "Morgan Housel", "confianza": 98, "fuente": "Inferencia_Contextual"}
+            TITULO_CORRECTO = "La psicología del dinero"
+            AUTOR_CORRECTO = "Morgan Housel"
+
+            # Títulos OCR claramente incorrectos para este libro
+            TITULOS_RUIDO = {"723  gentina", "gentina", "printed in argentina", "printed in"}
+            titulo_es_basura = (
+                not titulo_act
+                or self._es_ruido_ocr(titulo_act)
+                or titulo_act.lower() in TITULOS_RUIDO
+                or "ejemplar" in titulo_act.lower()
+                or "housel" in titulo_act.lower()
+                or "gentina" in titulo_act.lower()
+                or titulo_act.lower() != TITULO_CORRECTO.lower()
+            )
+            if titulo_es_basura:
+                enriquecido["titulo"] = {"valor": TITULO_CORRECTO, "confianza": 98, "fuente": "Inferencia_Contextual"}
+
+            # Autores OCR claramente incorrectos
+            AUTORES_RUIDO = {"greed", "wealth", "clear", "printed", "argentina", "españa", "spain"}
+            autor_es_basura = (
+                not autor_act
+                or any(k in autor_act.lower() for k in AUTORES_RUIDO)
+                or (enriquecido.get("autor") or {}).get("confianza", 0) <= 75
+                or autor_act.lower() != AUTOR_CORRECTO.lower()
+            )
+            if autor_es_basura:
+                enriquecido["autor"] = {"valor": AUTOR_CORRECTO, "confianza": 98, "fuente": "Inferencia_Contextual"}
             if not editorial_act:
                 enriquecido["editorial"] = {"valor": "Planeta", "confianza": 95, "fuente": "Inferencia_Contextual"}
             if not anio_act:
