@@ -108,15 +108,28 @@ async def captura_ocr(
     Agente Analizador: estructura los campos y enriquece con datos de internet por ISBN.
     El bibliotecario recibe la ficha sugerida para revisar y confirmar antes de guardar.
     """
-    tapa_bytes = await foto_tapa.read()
-    ficha_bytes = await foto_ficha.read()
+    tapa_bytes = await foto_tapa.read() if foto_tapa else b""
+    contratapa_bytes = await foto_contratapa.read() if foto_contratapa else b""
+    ficha_bytes = await foto_ficha.read() if foto_ficha else b""
 
     # Agente de Captura (OCR)
     captura = AgenteCaptura()
-    resultado_tapa = await captura.procesar_imagen_ocr(tapa_bytes)
-    resultado_ficha = await captura.procesar_imagen_ocr(ficha_bytes)
-    texto_combinado = resultado_tapa["texto_crudo"] + "\n" + resultado_ficha["texto_crudo"]
-    isbn_detectado = resultado_ficha["isbn_detectado"] or resultado_tapa["isbn_detectado"] or ""
+    resultado_tapa = await captura.procesar_imagen_ocr(tapa_bytes) if tapa_bytes else {"texto_crudo": "", "isbn_detectado": None}
+    resultado_contratapa = await captura.procesar_imagen_ocr(contratapa_bytes) if contratapa_bytes else {"texto_crudo": "", "isbn_detectado": None}
+    resultado_ficha = await captura.procesar_imagen_ocr(ficha_bytes) if ficha_bytes else {"texto_crudo": "", "isbn_detectado": None}
+
+    textos = [
+        resultado_ficha["texto_crudo"],
+        resultado_tapa["texto_crudo"],
+        resultado_contratapa["texto_crudo"],
+    ]
+    texto_combinado = "\n\n".join(t for t in textos if t)
+    isbn_detectado = (
+        resultado_ficha.get("isbn_detectado")
+        or resultado_tapa.get("isbn_detectado")
+        or resultado_contratapa.get("isbn_detectado")
+        or ""
+    )
 
     # Agente Analizador (estructuración + enriquecimiento por ISBN)
     analizador = AgenteAnalizador(config_repo=RepoConfig())

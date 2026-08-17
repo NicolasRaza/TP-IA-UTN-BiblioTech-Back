@@ -33,11 +33,16 @@ ResultadoOCR = dict  # {texto_crudo: str, confianza_ocr: int, isbn_detectado: st
 # Shape de retorno de decodificarQR (mismo que JS)
 ResultadoQR = dict   # {tipo: str, id: str, es_valido: bool}
 
-# Regex de ISBN (idéntica al original JS, adaptada a Python)
-_ISBN_REGEX = re.compile(
-    r"\b(?:ISBN[-:\s]*)?(97[89][\d\s\-]{10,}|\d{9}[\dX])\b",
-    re.IGNORECASE,
-)
+# Regex de ISBN robusta para OCR
+_ISBN_PATRONES = [
+    # Con prefijo explícito (ISBN, ISBN-13, 1SBN, I.S.B.N.)
+    re.compile(
+        r"(?:(?:ISBN(?:-?1[03])?|1SBN|I\.?S\.?B\.?N\.?)[:.\s]*)\s*([0-9\-\s]{10,22}[0-9X])\b",
+        re.IGNORECASE,
+    ),
+    # Formato ISBN-13 estándar (978... o 979...)
+    re.compile(r"\b(97[89][0-9\-\s]{10,18})\b"),
+]
 
 
 class AgenteCaptura:
@@ -84,12 +89,8 @@ class AgenteCaptura:
             texto_crudo = imagen_or_data
             confianza_ocr = 80
 
-        # Detección de ISBN (misma regex del JS original)
-        isbn_match = _ISBN_REGEX.search(texto_crudo)
-        isbn_detectado: Optional[str] = None
-        if isbn_match:
-            # group(1) captura el número sin el prefijo "ISBN:"
-            isbn_detectado = re.sub(r"[\s\-]", "", isbn_match.group(1))
+        # Detección de ISBN robusta
+        isbn_detectado: Optional[str] = self._extraer_isbn_texto(texto_crudo)
 
         return {
             "texto_crudo": texto_crudo,
@@ -97,6 +98,21 @@ class AgenteCaptura:
             "isbn_detectado": isbn_detectado,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+
+    def _extraer_isbn_texto(self, texto: str) -> Optional[str]:
+        if not texto:
+            return None
+        for patron in _ISBN_PATRONES:
+            for match in patron.finditer(texto):
+                raw = match.group(1) if match.lastindex else match.group(0)
+                limpio = re.sub(r"[^0-9X]", "", raw.upper())
+                if len(limpio) == 13 and limpio.startswith(("978", "979")):
+                    return limpio
+                if len(limpio) == 10:
+                    return limpio
+                if len(limpio) > 13 and limpio.startswith(("978", "979")):
+                    return limpio[:13]
+        return None
 
     async def _ejecutar_ocr(self, fuente: Union[bytes, Path]) -> tuple[str, int]:
         """
