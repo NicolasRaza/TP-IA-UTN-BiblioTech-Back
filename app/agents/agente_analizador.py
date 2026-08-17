@@ -13,7 +13,7 @@ Reglas de negocio conservadas intactas:
   - Enriquecimiento con Ollama (mismo prompt en español, timeout 45s, fallback)
   - Reglas de prioridad física (ISBN, año, páginas físicas preservados sobre la API)
   - Normalización de géneros
-  - Regla contextual específica "La psicología del dinero"
+  - Fallback genérico de sinopsis construido desde párrafos del OCR
   - Función buscar_por_isbn inyectada (equivale a window.buscarPorISBN)
 
 Cambios de plataforma:
@@ -117,64 +117,114 @@ class AgenteAnalizador:
     def _extraer_ficha_catalografica(self, texto: str) -> dict[str, str]:
         """
         Extrae metadatos de la ficha catalográfica (CIP / AACR2 / ISBD) si está presente.
-        Esta ficha se ubica usualmente en la página de créditos/derechos y contiene
-        los datos normalizados más precisos del libro.
+        Formato típico argentino/español:
+          Apellido, Nombre [Apellido2, Nombre2]
+
+          Título del libro. Nº edición.
+          Ciudad [Autónoma] de X : Editorial S.R.L., Año.
+          Páginas p. : il. ; dim cm
+          ISBN: xxx
+
+          1. Género/Materia. I. Título.
         """
         ficha: dict[str, str] = {}
         if not texto:
             return ficha
 
-        # 1. Título / Autor: "La psicología del dinero / Morgan Housel. - 2a ed."
-        m_tit = re.search(
-            r'([A-ZÁÉÍÓÚÜÑa-záéíóúüñ\s0-9:,\'\"\¿\?¡\!]{4,80}?)\s*/\s*([A-ZÁÉÍÓÚÜÑa-záéíóúüñ\s]{3,60}?)(?:\s*\.\s*-\s*|\s*—|\s*-\s*|\n|$)',
+        # ── 1. Línea ISBD: Título separado por " / " del autor ─────────────────
+        # Ej: "Título del libro / Nombre Apellido. - 2a ed."
+        m_isbd = re.search(
+            r'([A-ZÁÉÍÓÚÜÑa-záéíóúüñ\s0-9:,\'"¿?¡!\-]{4,90}?)'
+            r'\s*/\s*'
+            r'([A-ZÁÉÍÓÚÜÑa-záéíóúüñ\s\-\.]{3,70}?)'
+            r'(?:\s*\.\s*-|\s*—|\n|$)',
             texto,
         )
-        if m_tit:
-            ficha["titulo"] = m_tit.group(1).strip().replace("\n", " ")
-            cand_aut = m_tit.group(2).strip().replace("\n", " ")
-            if not any(k in cand_aut.lower() for k in ["traducción", "traduccion", "edición", "edicion", "editorial"]):
-                ficha["autor"] = cand_aut
+        if m_isbd:
+            tit_cand = m_isbd.group(1).strip().replace("\n", " ")
+            aut_cand = m_isbd.group(2).strip().replace("\n", " ")
+            if not any(k in aut_cand.lower() for k in ["traducción", "traduccion", "edición", "editorial"]):
+                ficha["titulo"] = tit_cand
+                ficha["autor"] = aut_cand
 
-        # 2. Autor formato "Apellido, Nombre" al inicio de bloque catalográfico
-        PALABRAS_NO_AUTOR = {
-            "wealth", "greed", "happiness", "money", "lessons", "psychology",
-            "editorial", "traduccion", "traducción", "derechos", "edicion",
-            "edición", "impreso", "buenos aires", "barcelona", "avellaneda", "planeta",
-            "james clear", "habitos atomicos", "hábitos atómicos",
+        # ── 2. Título en línea propia: "El Principito. Segunda edición." ────────
+        # Busca una línea que tenga «Título. [Algo] edición.» o «Título.» sola
+        if not ficha.get("titulo"):
+            m_tit_solo = re.search(
+                r'^([A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑa-záéíóúüñ\s0-9:,\'"¿?¡!\-]{2,80}?)'
+                r'\.\s*(?:Primera|Segunda|Tercera|Cuarta|Quinta|\d+[aª])?\s*[Ee]dición',
+                texto,
+                re.MULTILINE,
+            )
+            if m_tit_solo:
+                ficha["titulo"] = m_tit_solo.group(1).strip()
+
+        # ── 3. Autor CIP formato "Apellido, Nombre" (primera coincidencia válida) ─
+        # Palabras que nunca son nombres de persona en un CIP
+        PALABRAS_NO_PERSONA = {
+            "editorial", "traduccion", "traducción", "derechos", "edicion", "edición",
+            "impreso", "hecho", "ciudad", "buenos", "barcelona", "madrid",
+            "titulo", "título", "narrativa", "catalogacion", "catalogación",
         }
-        for m_aut in re.finditer(
-            r'^\s*([A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]+),\s+([A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]+(?:\s+[A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]+)*)',
-            texto,
-            re.MULTILINE,
-        ):
-            apellido = m_aut.group(1).strip()
-            nombre = m_aut.group(2).strip()
-            if (
-                apellido.lower() not in PALABRAS_NO_AUTOR
-                and nombre.lower() not in PALABRAS_NO_AUTOR
-                and not any(w in PALABRAS_NO_AUTOR for w in nombre.lower().split())
+        if not ficha.get("autor"):
+            for m_aut in re.finditer(
+                r'^\s*([A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]+(?:\s+de)?),\s+'
+                r'([A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]+(?:\s+[A-ZÁÉÍÓÚÜÑa-záéíóúüñ]+){0,3})',
+                texto,
+                re.MULTILINE,
             ):
-                if not ficha.get("autor"):
+                apellido = m_aut.group(1).strip()
+                nombre   = m_aut.group(2).strip()
+                if (
+                    apellido.lower() not in PALABRAS_NO_PERSONA
+                    and not any(w in PALABRAS_NO_PERSONA for w in nombre.lower().split())
+                ):
+                    # Reconstruir «Nombre Apellido» (o «Nombre de Apellido»)
                     ficha["autor"] = f"{nombre} {apellido}"
-                break
+                    break
 
-        # 3. Editorial y Año: "Buenos Aires : Planeta, 2024." o ": Planeta, 2024"
-        m_pub = re.search(r':\s*([A-Za-zÁÉÍÓÚÜÑáéíóúüñ\s\.]+?),\s*(\d{4})', texto)
+        # ── 4. Editorial + Año: «Ciudad [Autónoma]: Editorial S.R.L., Año.» ────
+        # Captura la editorial completa incluyendo siglas (S.R.L., S.A., etc.)
+        m_pub = re.search(
+            r':\s*([A-Za-zÁÉÍÓÚÜÑáéíóúüñ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ\s\.]+?)'
+            r',\s*(\d{4})',
+            texto,
+        )
         if m_pub:
             ed_nombre = m_pub.group(1).strip().rstrip(".")
-            if len(ed_nombre) < 40 and not any(r in ed_nombre.lower() for r in ["ciudad", "buenos aires", "españa", "mexico"]):
+            CIUDADES = ["ciudad", "buenos aires", "españa", "mexico", "madrid", "barcelona",
+                        "autónoma", "autonoma", "federal"]
+            if len(ed_nombre) < 60 and not any(c in ed_nombre.lower() for c in CIUDADES):
                 ficha["editorial"] = ed_nombre
             ficha["anio"] = m_pub.group(2).strip()
 
-        # 4. Páginas: "312 p. ; 23 x 15 cm."
+        # ── 5. Lugar de edición: «Ciudad [Autónoma] de Buenos Aires» ──────────
+        m_lugar = re.search(
+            r'^([A-ZÁÉÍÓÚÜÑ][A-Za-záéíóúüñ\s]+?)\s*:\s*[A-Za-záéíóúüñ]',
+            texto,
+            re.MULTILINE,
+        )
+        if m_lugar:
+            lugar_cand = m_lugar.group(1).strip()
+            # Filtrar que no sea un título o nombre de persona
+            if 4 < len(lugar_cand) < 80 and not re.search(r'[/,]', lugar_cand):
+                ficha["lugar"] = lugar_cand
+
+        # ── 6. Páginas: «96p.» o «312 p. ; 23 x 15 cm» ──────────────────────
         m_pag = re.search(r'\b(\d{2,4})\s*p\b', texto, re.IGNORECASE)
         if m_pag:
             ficha["paginas"] = m_pag.group(1)
 
-        # 5. Materia / Género: "1. Finanzas Personales."
-        m_mat = re.search(r'1\.\s*([A-Za-zÁÉÍÓÚÜÑáéíóúüñ\s/]+?)(?:\.|\s*I\.|\s*II\.|\n)', texto)
+        # ── 7. Género/Materia: «1. Narrativa Francesa. I. Título.» ─────────────
+        m_mat = re.search(
+            r'(?:^|\n)\s*1\.\s*([A-Za-záéíóúüñÁÉÍÓÚÜÑ][A-Za-záéíóúüñÁÉÍÓÚÜÑ\s/]+?)(?:\.|\s+I\.|\s+II\.|\n)',
+            texto,
+            re.MULTILINE,
+        )
         if m_mat:
-            ficha["genero"] = m_mat.group(1).strip()
+            genero_cand = m_mat.group(1).strip()
+            if len(genero_cand) > 3:
+                ficha["genero"] = genero_cand
 
         return ficha
 
@@ -241,7 +291,9 @@ class AgenteAnalizador:
 
         # 4. Editorial
         if not resultado["editorial"]["valor"]:
-            editorial_valor, editorial_confianza = self._extraer_editorial(lineas, texto_ocr)
+            # Pasar el autor ya detectado para evitar confundir apellido de autor con editorial
+            autor_ya_detectado = resultado.get("autor", {}).get("valor", "")
+            editorial_valor, editorial_confianza = self._extraer_editorial(lineas, texto_ocr, autor_ya_detectado)
             if editorial_valor:
                 resultado["editorial"] = {"valor": editorial_valor, "confianza": editorial_confianza}
 
@@ -407,7 +459,7 @@ class AgenteAnalizador:
 
         return "", 0
 
-    def _extraer_editorial(self, lineas: list[str], texto_ocr: str = "") -> tuple[str, int]:
+    def _extraer_editorial(self, lineas: list[str], texto_ocr: str = "", autor_candidato: str = "") -> tuple[str, int]:
         """Editorial — CIP + mención de sello + lista de conocidas + pattern copyright."""
         # 1. Buscar en Ficha CIP: ": Editorial, Año" o ": Editorial."
         if texto_ocr:
@@ -445,7 +497,12 @@ class AgenteAnalizador:
                 if any(k in ed_low for k in ["traducción", "traduccion", "derechos", "arrangement", "literary", "agency"]):
                     continue
                 # Si coincide con nombres conocidos de autor, omitir
-                if any(a in ed_low for a in ["sapkowski", "housel", "rowling", "tolkien", "king", "borges"]):
+                # Si el candidato coincide con el autor ya detectado, no es una editorial
+                if autor_candidato and any(
+                    token in ed_low
+                    for token in autor_candidato.lower().split()
+                    if len(token) > 3
+                ):
                     continue
                 if 2 < len(ed_cand) < 40:
                     return _capitalizar(ed_cand), 88
@@ -584,7 +641,7 @@ class AgenteAnalizador:
                 return False
             return True
 
-        # 1. Buscar líneas en MAYÚSCULAS consecutivas (ej: LA TORRE \n DE LA GOLONDRINA)
+        # 1. Buscar líneas en MAYÚSCULAS consecutivas (ej: EL TITULO \n DEL LIBRO)
         lineas_mayus: list[str] = []
         for l in lineas[:15]:
             if not _es_titulo_valido(l):
@@ -656,7 +713,7 @@ class AgenteAnalizador:
         prompt = (
             "Analiza el siguiente texto de portada/ficha técnica de un libro extraído por OCR y extrae los campos editoriales principales.\n"
             "Devuelve UNICAMENTE un objeto JSON válido con las siguientes claves:\n"
-            "\"titulo\": (string con el TÍTULO PRINCIPAL del libro EN ESPAÑOL. Si el texto incluye subtítulos de la versión original en inglés como 'Wealth, Greed, and Happiness' o 'Originally published as...', NO uses ese título en inglés; deduce o traduce el título principal en español, por ejemplo 'La psicología del dinero'),\n"
+            "\"titulo\": (string con el TÍTULO PRINCIPAL del libro EN ESPAÑOL. Si el texto contiene subtítulos o el título original en otro idioma (inglés, francés, etc.), NO los incluyas; deduce o traduce el título principal al español sin usar el subtítulo en el idioma original),\n"
             "\"autor\": (string con el autor o autores),\n"
             "\"editorial\": (string con la editorial),\n"
             "\"anio\": (string de 4 dígitos con el AÑO DE LA EDICIÓN FISICA ACTUAL. Reglas estrictas de jerarquía temporal: 1. Prioridad: Busca explícitamente la fecha de la impresión o edición actual en mano (ej. '2ª edición: febrero de 2024', 'impreso en febrero de 2024', '2024'). 2. Descarte: IGNORA AÑOS ANTIGUOS que acompañen a copyright original (ej. '© 2020', 'Originally published in 2020', '1ª edición 2021'). 3. Selección Múltiple: Si hay varios años en la ficha técnica, elige la fecha MÁS RECIENTE vinculada a la tirada/editorial local actual, NO la fecha histórica original),\n"
@@ -754,27 +811,8 @@ class AgenteAnalizador:
                         campo, val_ollama,
                     )
 
-            # Deducción inteligente por contexto (La psicología del dinero)
-            ctx_text = " ".join([
-                texto_ocr,
-                str(parsed.get("genero", "")),
-                str(parsed.get("sinopsis", "")),
-                str(parsed.get("autor", "")),
-                (resultado.get("autor") or {}).get("valor", ""),
-            ]).lower()
-
-            titulo_actual = (resultado.get("titulo") or {}).get("valor", "")
-            if _es_val_ruidoso("titulo", titulo_actual) or titulo_actual == "El comportamiento del dinero":
-                if (
-                    "housel" in ctx_text
-                    or ("psicolog" in ctx_text and "dinero" in ctx_text)
-                    or "9789504985303" in ctx_text
-                ):
-                    resultado["titulo"] = {"valor": "La psicología del dinero", "confianza": 98, "fuente": "IA_local"}
-                    logger.debug(
-                        "[AgenteAnalizador-Ollama] Título deducido con precisión por contexto: %s",
-                        resultado["titulo"]["valor"],
-                    )
+            # (Deducción contextual específica eliminada — el campo título queda con la
+            #  confianza asignada por Ollama o regex; la API externa es la capa siguiente.)
 
             # Normalización de género
             genero_val = (resultado.get("genero") or {}).get("valor", "")
@@ -789,37 +827,20 @@ class AgenteAnalizador:
                 elif "historia" in g_low or "ensayo" in g_low:
                     resultado["genero"]["valor"] = "Historia / Ensayo"
 
-            # Fallback de sinopsis
+            # Fallback genérico de sinopsis: construir desde párrafos del OCR
             sinopsis_val = (resultado.get("sinopsis") or {}).get("valor", "")
-            t_low = (resultado.get("titulo") or {}).get("valor", "").lower()
-            a_low = (resultado.get("autor") or {}).get("valor", "").lower()
-            if not sinopsis_val or len(sinopsis_val) < 15:
-                if "psicología del dinero" in t_low or "housel" in a_low or "housel" in ctx_text:
+            if (not sinopsis_val or len(sinopsis_val) < 15) and texto_ocr and len(texto_ocr) > 50:
+                parrafos = [
+                    p for p in texto_ocr.split("\n\n")
+                    if len(p) > 40 and "ISBN" not in p and "©" not in p and "www." not in p
+                ]
+                if parrafos:
+                    sinopsis_limpia = re.sub(r"\s+", " ", " ".join(parrafos)).strip()[:350]
                     resultado["sinopsis"] = {
-                        "valor": (
-                            "En 'La psicología del dinero', Morgan Housel explora cómo los hábitos, "
-                            "emociones y comportamientos influyen en nuestras decisiones financieras "
-                            "más que los números, ofreciendo lecciones clave sobre cómo administrar "
-                            "el dinero y construir riqueza personal."
-                        ),
-                        "confianza": 90,
-                        "fuente": "IA_local",
+                        "valor": sinopsis_limpia,
+                        "confianza": 75,
+                        "fuente": "OCR_Sintetizado",
                     }
-                    logger.debug(
-                        "[AgenteAnalizador-Ollama] Sinopsis generada automáticamente por contexto."
-                    )
-                elif texto_ocr and len(texto_ocr) > 50:
-                    parrafos = [
-                        p for p in texto_ocr.split("\n\n")
-                        if len(p) > 40 and "ISBN" not in p and "©" not in p and "www." not in p
-                    ]
-                    if parrafos:
-                        sinopsis_limpia = re.sub(r"\s+", " ", " ".join(parrafos)).strip()[:350]
-                        resultado["sinopsis"] = {
-                            "valor": sinopsis_limpia,
-                            "confianza": 75,
-                            "fuente": "OCR_Sintetizado",
-                        }
 
         except Exception as err:
             logger.warning(
@@ -890,98 +911,7 @@ class AgenteAnalizador:
                 logger.info("[AgenteAnalizador] Datos oficiales devueltos por API: %s", api_data)
                 enriquecido = self._aplicar_reglas_api(enriquecido, api_data, datos_ocr)
 
-        # 3. Regla contextual específica "La psicología del dinero"
-        txt_low = (texto_para_ia + " " + texto_crudo).lower()
-        es_libro_psicologia_dinero = (
-            "housel" in txt_low
-            or ("psicolog" in txt_low and "dinero" in txt_low)
-            or "9789504985303" in txt_low
-            or "psychology of money" in txt_low
-            or "cómo piensan los ricos" in txt_low
-            or "como piensan los ricos" in txt_low
-        )
-        if es_libro_psicologia_dinero:
-            titulo_act = (enriquecido.get("titulo") or {}).get("valor", "")
-            autor_act = (enriquecido.get("autor") or {}).get("valor", "")
-            editorial_act = (enriquecido.get("editorial") or {}).get("valor", "")
-            genero_act = (enriquecido.get("genero") or {}).get("valor", "")
-            paginas_act = (enriquecido.get("paginas") or {}).get("valor", "")
-            anio_act = (enriquecido.get("anio") or {}).get("valor", "")
-            lugar_act = (enriquecido.get("lugar") or {}).get("valor", "")
-            isbn_act = (enriquecido.get("isbn") or {}).get("valor", "")
-            sinopsis_act = (enriquecido.get("sinopsis") or {}).get("valor", "")
-
-            TITULO_CORRECTO = "La psicología del dinero"
-            AUTOR_CORRECTO = "Morgan Housel"
-
-            # Títulos OCR claramente incorrectos para este libro
-            TITULOS_RUIDO = {"723  gentina", "gentina", "printed in argentina", "printed in"}
-            titulo_es_basura = (
-                not titulo_act
-                or self._es_ruido_ocr(titulo_act)
-                or titulo_act.lower() in TITULOS_RUIDO
-                or "ejemplar" in titulo_act.lower()
-                or "housel" in titulo_act.lower()
-                or "gentina" in titulo_act.lower()
-                or titulo_act.lower() != TITULO_CORRECTO.lower()
-            )
-            if titulo_es_basura:
-                enriquecido["titulo"] = {"valor": TITULO_CORRECTO, "confianza": 98, "fuente": "Inferencia_Contextual"}
-
-            # Autores OCR claramente incorrectos
-            AUTORES_RUIDO = {"greed", "wealth", "clear", "printed", "argentina", "españa", "spain"}
-            autor_es_basura = (
-                not autor_act
-                or any(k in autor_act.lower() for k in AUTORES_RUIDO)
-                or (enriquecido.get("autor") or {}).get("confianza", 0) <= 75
-                or autor_act.lower() != AUTOR_CORRECTO.lower()
-            )
-            if autor_es_basura:
-                enriquecido["autor"] = {"valor": AUTOR_CORRECTO, "confianza": 98, "fuente": "Inferencia_Contextual"}
-            if not editorial_act:
-                enriquecido["editorial"] = {"valor": "Planeta", "confianza": 95, "fuente": "Inferencia_Contextual"}
-            if not anio_act:
-                enriquecido["anio"] = {"valor": "2024", "confianza": 95, "fuente": "Inferencia_Contextual"}
-            if not lugar_act:
-                enriquecido["lugar"] = {"valor": "Buenos Aires, Argentina", "confianza": 90, "fuente": "Inferencia_Contextual"}
-            if not isbn_act:
-                enriquecido["isbn"] = {"valor": "9789504985303", "confianza": 95, "fuente": "Inferencia_Contextual"}
-            if not genero_act or genero_act == "Otro" or "Finanz" not in genero_act:
-                enriquecido["genero"] = {"valor": "Finanzas / Economía", "confianza": 95, "fuente": "Inferencia_Contextual"}
-            if not paginas_act:
-                enriquecido["paginas"] = {"valor": "312", "confianza": 92, "fuente": "Base_Conocimiento"}
-            if not sinopsis_act or len(sinopsis_act) < 20:
-                enriquecido["sinopsis"] = {
-                    "valor": (
-                        "En 'La psicología del dinero', Morgan Housel comparte 18 claves imperecederas "
-                        "sobre la riqueza, la codicia y la felicidad, demostrando que el éxito financiero "
-                        "no es una ciencia dura, sino una habilidad blanda donde el comportamiento importa "
-                        "más que los conocimientos técnicos."
-                    ),
-                    "confianza": 90,
-                    "fuente": "Inferencia_Contextual",
-                }
-
-        # Regla contextual para Andrzej Sapkowski / Geralt de Rivia / La torre de la golondrina
-        es_witcher = (
-            "sapkowski" in txt_low
-            or "golondrina" in txt_low
-            or "geralt" in txt_low
-            or "9788498891096" in txt_low
-            or "wieza jaskolki" in txt_low
-            or "wieża jaskółki" in txt_low
-        )
-        if es_witcher:
-            enriquecido["titulo"] = {"valor": "La torre de la golondrina", "confianza": 99, "fuente": "Inferencia_Contextual"}
-            enriquecido["autor"] = {"valor": "Andrzej Sapkowski", "confianza": 99, "fuente": "Inferencia_Contextual"}
-            enriquecido["editorial"] = {"valor": "Artifex", "confianza": 99, "fuente": "Inferencia_Contextual"}
-            enriquecido["anio"] = {"valor": "2016", "confianza": 99, "fuente": "Inferencia_Contextual"}
-            enriquecido["lugar"] = {"valor": "Madrid, España", "confianza": 99, "fuente": "Inferencia_Contextual"}
-            enriquecido["isbn"] = {"valor": "9788498891096", "confianza": 99, "fuente": "Inferencia_Contextual"}
-            enriquecido["genero"] = {"valor": "Fantasía / Ficción", "confianza": 95, "fuente": "Inferencia_Contextual"}
-            enriquecido["portada"] = {"valor": "", "confianza": 0}
-
-        # 4. Completar campos faltantes
+        # 3. Completar campos faltantes
         for k in CAMPOS_EDITORIALES:
             if not enriquecido.get(k) or not (enriquecido[k] or {}).get("valor"):
                 enriquecido[k] = {"valor": "", "confianza": 0, "estado": "pendiente_carga_manual"}
