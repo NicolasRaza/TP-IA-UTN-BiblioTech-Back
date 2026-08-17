@@ -1,9 +1,13 @@
-from pydantic_settings import BaseSettings
+from pathlib import Path
 from typing import Optional
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+ENV_FILE = BASE_DIR / ".env"
 
 
 class Settings(BaseSettings):
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:password@localhost:5432/sgb_db"
+    DATABASE_URL: str = "postgresql+asyncpg://sgb_user:sgb123@localhost:5432/sgb_db"
     SECRET_KEY: str = "cambia-esto-en-produccion"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
@@ -18,8 +22,12 @@ class Settings(BaseSettings):
     MAX_PRESTAMOS_SIMULTANEOS: int = 3
     HORAS_RESERVA_DISPONIBLE: int = 48
 
-    class Config:
-        env_file = ".env"
+    model_config = SettingsConfigDict(
+        env_file=(str(ENV_FILE), ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 
 settings = Settings()
+
