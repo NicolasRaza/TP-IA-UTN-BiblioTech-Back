@@ -711,43 +711,19 @@ class AgenteAnalizador:
         )
 
         prompt = (
-            "Eres un asistente bibliotecario experto. Analiza el siguiente texto extraído por OCR de un libro "
-            "(que incluye bloques identificados: PORTADA/TAPA, FICHA CATALOGRÁFICA/INTERIOR y CONTRATAPA) "
-            "y extrae los campos editoriales estructurados.\n\n"
-            "REGLA FUNDAMENTAL DE LITERALIDAD (CERO ALUCINACIONES):\n"
-            "Queda TERMINANTEMENTE PROHIBIDO inventar, suponer o asociar de memoria títulos o autores por afinidad temática. "
-            "Cada dato extraído DEBE corresponder a palabras impresas que existan de forma literal en el texto OCR suministrado.\n\n"
-            "CRITERIOS ESTRUCTURALES Y POSICIONALES DE EXTRACCIÓN:\n\n"
-            "1. TÍTULO (\"titulo\"):\n"
-            "   - DEBE EXTRAERSE OBLIGATORIAMENTE DEL BLOQUE '=== PORTADA / TAPA DEL LIBRO ==='.\n"
-            "   - Es el NOMBRE PROPIO DE LA OBRA, ubicado en la parte central destacada de la portada. A menudo ocupa múltiples líneas consecutivas por diseño (ej. cuando el título está dividido en varias líneas, debes unirlas en una sola frase coherente).\n"
-            "   - DISTINCIÓN CRÍTICA CON LA EDITORIAL: En la portada suele figurar el sello o logo editorial al pie o en los márgenes. NUNCA asignes el nombre de la editorial o marca como título del libro. El campo 'titulo' y el campo 'editorial' jamás pueden tener el mismo valor.\n"
-            "   - DISTINCIÓN CON EL AUTOR: El nombre del autor (habitualmente arriba o debajo del título) NO forma parte del título.\n"
-            "   - Excluye nombres de sagas, series, universos o ciclos secundarios (patrones con palabras como 'saga', 'colección', 'serie', 'ciclo', 'universo', 'volumen', 'tomo').\n"
-            "   - Si la ficha interior indica un título original en otro idioma (patrón 'Título original:'), mantén el título en español presente en la portada.\n\n"
-            "2. AUTOR (\"autor\"):\n"
-            "   - DEBE EXTRAERSE OBLIGATORIAMENTE DEL BLOQUE '=== PORTADA / TAPA DEL LIBRO ==='.\n"
-            "   - Transcribe el nombre propio de la persona autora destacada en la portada. Limpia puntos o signos parásitos del OCR.\n"
-            "   - NUNCA tomes nombres asociados a roles secundarios (patrones como 'traducción de', 'traductor', 'ilustraciones de', 'prólogo de', 'reseña de').\n"
-            "   - Excluye nombres de sellos editoriales o ciudades.\n\n"
-            "3. EDITORIAL (\"editorial\"):\n"
-            "   - Nombre del sello o empresa editorial presente en el pie de la portada o en la ficha técnica/página de créditos (frecuentemente tras el patrón 'Ciudad: Editorial' o precedido por términos como 'Editorial', 'Ediciones' o sellos de publicación).\n"
-            "   - Extrae únicamente el nombre limpio de la editorial, omitiendo ciudades, direcciones y códigos postales.\n\n"
-            "4. AÑO (\"anio\"):\n"
-            "   - Cadena de 4 dígitos correspondiente al año de la edición física actual. En la ficha técnica, selecciona siempre la fecha de la tirada o reimpresión más reciente, descartando años anteriores correspondientes a copyrights históricos o primeras ediciones ya superadas.\n\n"
-            "5. ISBN (\"isbn\"):\n"
-            "   - Identificador numérico de 10 o 13 dígitos detectado en la ficha técnica o código de barras.\n\n"
-            "6. PÁGINAS (\"paginas\"):\n"
-            "   - Número total de páginas de la obra, identificado en la ficha por valores numéricos seguidos de abreviaturas como 'p.', 'pág.', 'págs.' o descriptores de paginación.\n\n"
-            "7. GÉNERO (\"genero\"):\n"
-            "   - Clasificación temática o materia bibliográfica principal de la obra.\n\n"
-            "8. SINOPSIS (\"sinopsis\"):\n"
-            "   - Redacción descriptiva en español de 2 a 4 oraciones sobre el argumento o contenido temático de la obra, basada en el texto de la contratapa si existe.\n\n"
-            "Todas las reglas anteriores son criterios estrictamente estructurales y de patrones de texto universales. Aplica estos criterios con total rigurosidad.\n\n"
-            "Devuelve ÚNICAMENTE un objeto JSON válido con las siguientes claves obligatorias:\n"
-            "{\"titulo\": \"...\", \"autor\": \"...\", \"editorial\": \"...\", \"anio\": \"...\", \"isbn\": \"...\", \"paginas\": \"...\", \"genero\": \"...\", \"sinopsis\": \"...\"}\n\n"
-            "Si no puedes determinar un campo con certeza a partir de los criterios dados, asigna una cadena vacía \"\".\n\n"
-            f"Texto OCR:\n\"\"\"\n{texto_ocr[:3500]}\n\"\"\""
+            "Analiza el siguiente texto de portada/ficha técnica de un libro extraído por OCR y extrae los campos editoriales principales.\n"
+            "Devuelve UNICAMENTE un objeto JSON válido con las siguientes claves:\n"
+            "\"titulo\": (string con el TÍTULO PRINCIPAL del libro EN ESPAÑOL. Si el texto contiene subtítulos o el título original en otro idioma (inglés, francés, etc.), NO los incluyas; deduce o traduce el título principal al español sin usar el subtítulo en el idioma original),\n"
+            "\"autor\": (string con el autor o autores),\n"
+            "\"editorial\": (string con la editorial),\n"
+            "\"anio\": (string de 4 dígitos con el AÑO DE LA EDICIÓN FISICA ACTUAL. Reglas estrictas de jerarquía temporal: 1. Prioridad: Busca explícitamente la fecha de la impresión o edición actual en mano (ej. '2ª edición: febrero de 2024', 'impreso en febrero de 2024', '2024'). 2. Descarte: IGNORA AÑOS ANTIGUOS que acompañen a copyright original (ej. '© 2020', 'Originally published in 2020', '1ª edición 2021'). 3. Selección Múltiple: Si hay varios años en la ficha técnica, elige la fecha MÁS RECIENTE vinculada a la tirada/editorial local actual, NO la fecha histórica original),\n"
+            "\"isbn\": (string con el ISBN si se detecta, o \"\"),\n"
+            "\"paginas\": (string con la cantidad de páginas si se detecta, o \"\"),\n"
+            "\"genero\": (string con el género o categoría temática),\n"
+            "\"sinopsis\": (string de 2 a 4 oraciones redactando una síntesis descriptiva del libro basada en la contratapa o tus conocimientos sobre la obra. NUNCA la dejes vacía si hay texto descriptivo o si conoces el libro)\n"
+            "\n"
+            "Si no puedes determinar un campo con certeza, asigna una cadena vacía \"\".\n"
+            f"Texto OCR:\n\"\"\"\n{texto_ocr[:1800]}\n\"\"\""
         )
 
         payload: dict[str, Any] = {
@@ -797,19 +773,11 @@ class AgenteAnalizador:
             )
             logger.debug("[AgenteAnalizador-Ollama] JSON parseado con éxito: %s", parsed)
 
-            ed_propuesta = str(parsed.get("editorial") or "").strip().lower()
-            aut_propuesto = str(parsed.get("autor") or "").strip().lower()
-
             def _es_val_ruidoso(campo: str, val: str) -> bool:
                 if not val or val in ("a", "—"):
                     return True
                 if campo == "titulo":
-                    v = val.lower().strip()
-                    # El título nunca puede ser idéntico o contener solo la editorial o el autor
-                    if ed_propuesta and (v == ed_propuesta or v in ed_propuesta or ed_propuesta in v):
-                        return True
-                    if aut_propuesto and (v == aut_propuesto or v in aut_propuesto):
-                        return True
+                    v = val.lower()
                     es_direccion = any(k in v for k in [
                         "ciudad", "autón", "buenos aires", "edición", "impreso",
                         "derechos", "www.", "http", "mo mo", "4titul", "na de",
@@ -819,49 +787,29 @@ class AgenteAnalizador:
                         or "fruto de nuestro" in v
                         or len(val) > 100
                         or (val.count(",") + val.count("|") + val.count("/")) >= 3
-                        or len(val) < 4
+                        or len(val) < 5
                     )
                     return es_direccion or es_eslogan
                 return False
 
-            # Ollama activo → fuente de verdad primaria para todos los campos.
-            # Siempre aplica el valor de Ollama (ignorando confianza de regex/CIP),
-            # salvo que el propio valor de Ollama sea ruidoso.
             campos = ["titulo", "autor", "editorial", "anio", "isbn", "paginas", "genero", "sinopsis"]
             for campo in campos:
+                val_actual: str = (resultado.get(campo) or {}).get("valor", "")
+                conf_actual: int = (resultado.get(campo) or {}).get("confianza", 0)
                 val_ollama: str = str(parsed.get(campo) or "").strip()
 
-                if not val_ollama:
-                    # Ollama no devolvió nada para este campo → conservar regex/CIP
-                    continue
-
-                if campo == "titulo" and _es_val_ruidoso("titulo", val_ollama):
-                    logger.warning(
-                        "[AgenteAnalizador-Ollama] Título de Ollama descartado por ser ruidoso: %s",
-                        val_ollama,
+                if val_ollama and (_es_val_ruidoso(campo, val_actual) or conf_actual <= 65 or not val_actual):
+                    if campo == "titulo" and _es_val_ruidoso("titulo", val_ollama):
+                        logger.warning(
+                            "[AgenteAnalizador-Ollama] Título de Ollama descartado por ser eslogan: %s",
+                            val_ollama,
+                        )
+                        continue
+                    resultado[campo] = {"valor": val_ollama, "confianza": 75, "fuente": "IA_local"}
+                    logger.debug(
+                        "[AgenteAnalizador-Ollama] Campo \"%s\" enriquecido por Ollama: \"%s\"",
+                        campo, val_ollama,
                     )
-                    continue
-
-                # Limpieza cosmética de autor
-                if campo == "autor":
-                    val_ollama = re.sub(r"\s*\.\s*", " ", val_ollama).strip()
-                    if val_ollama.isupper() and len(val_ollama) > 3:
-                        val_ollama = val_ollama.title()
-
-                # Limpieza cosmética de título
-                if campo == "titulo":
-                    if val_ollama.isupper() and len(val_ollama) > 3:
-                        val_ollama = val_ollama.title()
-
-                # Limpieza de ISBN
-                if campo == "isbn":
-                    val_ollama = re.sub(r"[^0-9X]", "", val_ollama.upper())
-
-                resultado[campo] = {"valor": val_ollama, "confianza": 90, "fuente": "IA_local"}
-                logger.debug(
-                    "[AgenteAnalizador-Ollama] Campo \"%s\" establecido por Ollama (fuente primaria): \"%s\"",
-                    campo, val_ollama,
-                )
 
             # (Deducción contextual específica eliminada — el campo título queda con la
             #  confianza asignada por Ollama o regex; la API externa es la capa siguiente.)
@@ -992,10 +940,9 @@ class AgenteAnalizador:
         self, isbn: str, autor: str = "", titulo: str = ""
     ) -> Optional[dict[str, Any]]:
         """Busca metadatos oficiales en Google Books API y OpenLibrary."""
-        isbn_limpio = re.sub(r"[^0-9X]", "", (isbn or "").upper())
         # 1. Google Books
-        if isbn_limpio or titulo:
-            q = f"isbn:{isbn_limpio}" if isbn_limpio else f"intitle:{titulo}+inauthor:{autor}"
+        if isbn or titulo:
+            q = f"isbn:{isbn}" if isbn else f"intitle:{titulo}+inauthor:{autor}"
             url = f"https://www.googleapis.com/books/v1/volumes?q={q}"
             from app.core.config import settings
             if getattr(settings, "GOOGLE_BOOKS_API_KEY", None):
