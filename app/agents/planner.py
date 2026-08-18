@@ -36,14 +36,14 @@ class PlannerService:
         except Exception as e:
             logger.warning(f"No se pudo iniciar el scheduler: {e}")
 
-    def detener(self) -> None:
+    def detener(self):
         if self.scheduler.running:
             self.scheduler.shutdown()
             logger.info("Agente Planificador (Scheduler) detenido")
 
     def _inicializar_firebase(self):
-        try:                                    # ← indentado con 4 espacios
-            import firebase_admin               # ← indentado con 8 espacios
+        try:
+            import firebase_admin
             from firebase_admin import credentials
             import json
             from app.core.config import settings
