@@ -792,29 +792,24 @@ class AgenteAnalizador:
                     return es_direccion or es_eslogan
                 return False
 
-            # Ollama activo → fuente de verdad primaria para todos los campos.
-            # Siempre aplica el valor de Ollama (ignorando confianza de regex/CIP),
-            # salvo que el propio valor de Ollama sea ruidoso.
             campos = ["titulo", "autor", "editorial", "anio", "isbn", "paginas", "genero", "sinopsis"]
             for campo in campos:
+                val_actual: str = (resultado.get(campo) or {}).get("valor", "")
+                conf_actual: int = (resultado.get(campo) or {}).get("confianza", 0)
                 val_ollama: str = str(parsed.get(campo) or "").strip()
 
-                if not val_ollama:
-                    # Ollama no devolvió nada para este campo → conservar regex/CIP
-                    continue
-
-                if campo == "titulo" and _es_val_ruidoso("titulo", val_ollama):
-                    logger.warning(
-                        "[AgenteAnalizador-Ollama] Título de Ollama descartado por ser ruidoso: %s",
-                        val_ollama,
+                if val_ollama and (_es_val_ruidoso(campo, val_actual) or conf_actual <= 65 or not val_actual):
+                    if campo == "titulo" and _es_val_ruidoso("titulo", val_ollama):
+                        logger.warning(
+                            "[AgenteAnalizador-Ollama] Título de Ollama descartado por ser eslogan: %s",
+                            val_ollama,
+                        )
+                        continue
+                    resultado[campo] = {"valor": val_ollama, "confianza": 75, "fuente": "IA_local"}
+                    logger.debug(
+                        "[AgenteAnalizador-Ollama] Campo \"%s\" enriquecido por Ollama: \"%s\"",
+                        campo, val_ollama,
                     )
-                    continue
-
-                resultado[campo] = {"valor": val_ollama, "confianza": 90, "fuente": "IA_local"}
-                logger.debug(
-                    "[AgenteAnalizador-Ollama] Campo \"%s\" establecido por Ollama (fuente primaria): \"%s\"",
-                    campo, val_ollama,
-                )
 
             # (Deducción contextual específica eliminada — el campo título queda con la
             #  confianza asignada por Ollama o regex; la API externa es la capa siguiente.)
