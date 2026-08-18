@@ -118,16 +118,20 @@ async def captura_ocr(
     resultado_contratapa = await captura.procesar_imagen_ocr(contratapa_bytes) if contratapa_bytes else {"texto_crudo": "", "isbn_detectado": None}
     resultado_ficha = await captura.procesar_imagen_ocr(ficha_bytes) if ficha_bytes else {"texto_crudo": "", "isbn_detectado": None}
 
-    textos = [
-        resultado_ficha["texto_crudo"],
-        resultado_tapa["texto_crudo"],
-        resultado_contratapa["texto_crudo"],
-    ]
-    texto_combinado = "\n\n".join(t for t in textos if t)
+    # Organizar textos con prioridad a Portada / Tapa para título y autor
+    bloques = []
+    if resultado_tapa.get("texto_crudo"):
+        bloques.append(f"=== PORTADA / TAPA DEL LIBRO ===\n{resultado_tapa['texto_crudo']}")
+    if resultado_ficha.get("texto_crudo"):
+        bloques.append(f"=== FICHA CATALOGRÁFICA / PÁGINA DE CRÉDITOS ===\n{resultado_ficha['texto_crudo']}")
+    if resultado_contratapa.get("texto_crudo"):
+        bloques.append(f"=== CONTRATAPA / SINOPSIS ===\n{resultado_contratapa['texto_crudo']}")
+
+    texto_combinado = "\n\n".join(bloques)
     isbn_detectado = (
         resultado_ficha.get("isbn_detectado")
-        or resultado_tapa.get("isbn_detectado")
         or resultado_contratapa.get("isbn_detectado")
+        or resultado_tapa.get("isbn_detectado")
         or ""
     )
 
