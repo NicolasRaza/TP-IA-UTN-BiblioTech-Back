@@ -41,16 +41,29 @@ class PlannerService:
             self.scheduler.shutdown()
             logger.info("Agente Planificador (Scheduler) detenido")
 
-    def _inicializar_firebase(self) -> None:
-        try:
-            import firebase_admin
-            from firebase_admin import credentials
-            from app.core.config import settings
-            if getattr(settings, "FIREBASE_CREDENTIALS_PATH", None) and not firebase_admin._apps:
-                cred = credentials.Certificate(settings.FIREBASE_CREDENTIALS_PATH)
-                self._firebase_app = firebase_admin.initialize_app(cred)
-        except Exception as e:
-            logger.warning(f"Firebase no inicializado: {e}. Las notificaciones push no estarán disponibles.")
+    def _inicializar_firebase(self):
+    try:
+        import firebase_admin
+        from firebase_admin import credentials
+        import json
+        from app.core.config import settings
+
+        if firebase_admin._apps:
+            return
+
+        # Railway: lee desde variable de entorno
+        if settings.FIREBASE_CREDENTIALS_JSON:
+            cred_dict = json.loads(settings.FIREBASE_CREDENTIALS_JSON)
+            cred = credentials.Certificate(cred_dict)
+            firebase_admin.initialize_app(cred)
+
+        # Local: lee desde archivo
+        elif settings.FIREBASE_CREDENTIALS_PATH:
+            cred = credentials.Certificate(settings.FIREBASE_CREDENTIALS_PATH)
+            firebase_admin.initialize_app(cred)
+
+    except Exception as e:
+        logger.warning(f"Firebase no inicializado: {e}")
 
     async def verificar_vencimientos(self) -> None:
         """Revisa préstamos activos y envía recordatorios 3 días y 1 día antes del vencimiento."""

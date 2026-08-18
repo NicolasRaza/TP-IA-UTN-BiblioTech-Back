@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 ENV_FILE = BASE_DIR / ".env"
-
+FIREBASE_CREDENTIALS_JSON: Optional[str] = None
 
 class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://sgb_user:sgb123@localhost:5432/sgb_db"
