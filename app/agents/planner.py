@@ -42,28 +42,26 @@ class PlannerService:
             logger.info("Agente Planificador (Scheduler) detenido")
 
     def _inicializar_firebase(self):
-    try:
-        import firebase_admin
-        from firebase_admin import credentials
-        import json
-        from app.core.config import settings
+        try:                                    # ← indentado con 4 espacios
+            import firebase_admin               # ← indentado con 8 espacios
+            from firebase_admin import credentials
+            import json
+            from app.core.config import settings
 
-        if firebase_admin._apps:
-            return
+            if firebase_admin._apps:
+                return
 
-        # Railway: lee desde variable de entorno
-        if settings.FIREBASE_CREDENTIALS_JSON:
-            cred_dict = json.loads(settings.FIREBASE_CREDENTIALS_JSON)
-            cred = credentials.Certificate(cred_dict)
-            firebase_admin.initialize_app(cred)
+            if settings.FIREBASE_CREDENTIALS_JSON:
+                cred_dict = json.loads(settings.FIREBASE_CREDENTIALS_JSON)
+                cred = credentials.Certificate(cred_dict)
+                firebase_admin.initialize_app(cred)
 
-        # Local: lee desde archivo
-        elif settings.FIREBASE_CREDENTIALS_PATH:
-            cred = credentials.Certificate(settings.FIREBASE_CREDENTIALS_PATH)
-            firebase_admin.initialize_app(cred)
+            elif settings.FIREBASE_CREDENTIALS_PATH:
+                cred = credentials.Certificate(settings.FIREBASE_CREDENTIALS_PATH)
+                firebase_admin.initialize_app(cred)
 
-    except Exception as e:
-        logger.warning(f"Firebase no inicializado: {e}")
+        except Exception as e:
+            logger.warning(f"Firebase no inicializado: {e}")
 
     async def verificar_vencimientos(self) -> None:
         """Revisa préstamos activos y envía recordatorios 3 días y 1 día antes del vencimiento."""
