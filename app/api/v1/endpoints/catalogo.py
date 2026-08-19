@@ -313,3 +313,22 @@ async def baja_ejemplar(
     ejemplar.estado = EstadoEjemplar.BAJA
     await db.commit()
     return {"mensaje": "Ejemplar dado de baja", "codigo_qr": ejemplar.codigo_qr}
+
+@router.get(
+    "/titulos/{titulo_id}/ejemplares",
+    response_model=list[EjemplarResponse],
+    summary="Listar ejemplares de un título",
+    description="Retorna todos los ejemplares activos de un título, con su QR, estado y condición física.",
+    tags=["Catálogo"],
+)
+async def listar_ejemplares_de_titulo(
+    titulo_id: int,
+    _: Usuario = Depends(get_usuario_actual),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Ejemplar)
+        .where(Ejemplar.titulo_id == titulo_id, Ejemplar.activo == True)
+        .order_by(Ejemplar.id)
+    )
+    return result.scalars().all()
