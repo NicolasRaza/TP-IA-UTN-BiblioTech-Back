@@ -8,7 +8,7 @@ from app.db.session import engine, Base
 from app.agents.planner import agente_planificador
 
 # Importar todos los modelos para que Alembic y Base los detecte
-from app.models import usuario, libro, circulacion  # noqa: F401
+from app.models import usuario, libro, circulacion, sistema  # noqa: F401
 
 logger = logging.getLogger(__name__)
 

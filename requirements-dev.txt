@@ -1,0 +1,5 @@
+# Dependencias sólo de desarrollo: la suite de tests.
+-r requirements.txt
+pytest==8.2.0
+pytest-asyncio==0.23.7
+aiosqlite==0.20.0

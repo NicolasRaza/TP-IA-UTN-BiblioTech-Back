@@ -6,6 +6,7 @@ from app.core.deps import get_db, get_usuario_actual, require_bibliotecario
 from app.core.security import hashear_password
 from app.models.usuario import Lector, Usuario, EstadoUsuario, RolUsuario
 from app.models.circulacion import Prestamo, EstadoPrestamo, Multa, EstadoMulta
+from app.models.sistema import EventoAuditoria
 from app.schemas.usuario import LectorCreate, LectorUpdate, LectorResponse, LectorFichaResponse
 
 router = APIRouter(prefix="/lectores", tags=["Lectores"])
@@ -64,6 +65,19 @@ async def crear_lector(
         consentimiento_datos=data.consentimiento_datos,
     )
     db.add(lector)
+    await db.flush()
+
+    # El autorregistro es público: el cliente no tiene token con el cual
+    # asentar el evento en `POST /auditoria`, así que la traza la escribe el
+    # servidor, que además es el único que puede afirmarla sin creerle a nadie.
+    db.add(
+        EventoAuditoria(
+            tipo="alta_lector",
+            descripcion=f"Autorregistro de {lector.apellido}, {lector.nombre} (doc. {lector.documento})",
+            usuario_id=usuario.id,
+        )
+    )
+
     await db.commit()
     await db.refresh(lector)
     return lector
