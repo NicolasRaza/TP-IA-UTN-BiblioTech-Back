@@ -85,6 +85,77 @@ def _capitalizar(s: str) -> str:
     return s.capitalize() if s else s
 
 
+def _limpiar_autor(autor: str) -> str:
+    """
+    Limpia y normaliza el formato del nombre de autor:
+      - Elimina puntos parásitos e innecesarios (ej: 'ANDRZEJ. SAPKOWSKI' -> 'Andrzej Sapkowski').
+      - Convierte mayúsculas sostenidas rígidas a Title Case respetando partículas y guiones.
+    """
+    if not autor:
+        return ""
+    # Limpiar espacios alrededor de guiones (ej. 'Saint - Exupéry' -> 'Saint-Exupéry')
+    s = re.sub(r"\s*-\s*", "-", autor)
+    # Quitar puntos parásitos tras palabras de 2 o más letras
+    s = re.sub(r"([A-Za-zÁÉÍÓÚÜÑáéíóúüñ]{2,})\.", r"\1", s).strip()
+    s = re.sub(r"\s*\.\s*", " ", s).strip()
+    s = re.sub(r"\s+", " ", s)
+
+    # Si está en mayúsculas sostenidas, normalizar a Title Case respetando partículas y guiones
+    if s.isupper() and len(s) > 3:
+        particulas = {"de", "del", "la", "las", "los", "y", "van", "von", "der", "den", "di", "da"}
+        palabras = s.split()
+        palabras_formateadas = []
+        for i, p in enumerate(palabras):
+            p_lower = p.lower()
+            if "-" in p:
+                p_formateada = "-".join(part.capitalize() for part in p.split("-"))
+            elif i > 0 and p_lower in particulas:
+                p_formateada = p_lower
+            else:
+                p_formateada = p.capitalize()
+            palabras_formateadas.append(p_formateada)
+        s = " ".join(palabras_formateadas)
+    return s
+
+
+def _normalizar_genero(genero: str) -> str:
+    """
+    Normaliza clasificaciones de género:
+      - Limpia prefijos y numeraciones CIP (ej. '1. Narrativa Francesa. I. Título. CDD 843' -> 'Narrativa Francesa').
+      - Traduce y mapea términos genéricos en inglés hacia categorías bibliográficas precisas en español.
+    """
+    if not genero:
+        return ""
+    g = genero.strip()
+    # Limpiar prefijos numéricos de ficha CIP y sufijos de catalogación
+    g = re.sub(r"^\d+\.\s*", "", g)
+    g = re.sub(r"\bCDD\s*\d+.*$", "", g, flags=re.IGNORECASE).strip()
+    g = re.sub(r"\.\s*(?:I|II|III)\..*$", "", g).strip().rstrip(".")
+
+    g_low = g.lower()
+    # Mapeo de términos genéricos en inglés a categorías en español
+    if g_low in ("fiction", "general fiction", "literary fiction", "novela"):
+        return "Narrativa"
+    if "fantasy" in g_low or "fantasía" in g_low or "fantasia" in g_low:
+        return "Literatura Fantástica"
+    if "science fiction" in g_low or "ciencia ficción" in g_low or "ciencia ficcion" in g_low:
+        return "Ciencia Ficción"
+    if any(k in g_low for k in ["personal finance", "finance", "finanzas", "dinero", "invers"]):
+        return "Finanzas Personales"
+    if any(k in g_low for k in ["self-help", "desarrollo personal", "autoayuda", "superacion"]):
+        return "Desarrollo Personal"
+    if any(k in g_low for k in ["thriller", "misterio", "policial", "detective", "suspense"]):
+        return "Novela Policial / Thriller"
+    if any(k in g_low for k in ["history", "historia", "ensayo"]):
+        return "Historia / Ensayo"
+    if any(k in g_low for k in ["juvenile fiction", "children", "infantil", "juvenil", "cuentos"]):
+        return "Infantil / Juvenil"
+    if "philosophy" in g_low or "filosofía" in g_low or "filosofia" in g_low:
+        return "Filosofía"
+
+    return _capitalizar(g) if len(g) > 2 else g
+
+
 class AgenteAnalizador:
     """
     Agente 2 — Analizador y Enriquecimiento.
@@ -133,6 +204,12 @@ class AgenteAnalizador:
 
         # ── 1. Línea ISBD: Título separado por " / " del autor ─────────────────
         # Ej: "Título del libro / Nombre Apellido. - 2a ed."
+        # CRÍTICO: Rechazar si el candidato contiene ruido de imprenta
+        RUIDO_ISBD = {
+            "impreso", "printed", "isbn", "ejemplares", "ejemplar",
+            "depósito", "deposito", "hecho en", "queda", "derechos",
+            "www.", "http", "reservados",
+        }
         m_isbd = re.search(
             r'([A-ZÁÉÍÓÚÜÑa-záéíóúüñ\s0-9:,\'"¿?¡!\-]{4,90}?)'
             r'\s*/\s*'
@@ -141,11 +218,26 @@ class AgenteAnalizador:
             texto,
         )
         if m_isbd:
-            tit_cand = m_isbd.group(1).strip().replace("\n", " ")
-            aut_cand = m_isbd.group(2).strip().replace("\n", " ")
-            if not any(k in aut_cand.lower() for k in ["traducción", "traduccion", "edición", "editorial"]):
+            raw_tit = m_isbd.group(1).strip()
+            raw_aut = m_isbd.group(2).strip()
+            # En fichas CIP, la cabecera «Apellido, Nombre» suele estar en la línea anterior al título
+            lineas_tit = [l.strip() for l in raw_tit.split("\n") if l.strip()]
+            tit_cand = lineas_tit[-1] if lineas_tit else raw_tit
+            aut_cand = raw_aut
+
+            # Rechazar si alguno de los grupos es ruido de imprenta
+            tit_low = tit_cand.lower()
+            aut_low = aut_cand.lower()
+            es_ruido_isbd = (
+                any(k in tit_low for k in RUIDO_ISBD)
+                or any(k in aut_low for k in RUIDO_ISBD)
+                or any(k in aut_low for k in ["traducción", "traduccion", "edición", "editorial"])
+                or re.search(r'\b(in|en)\s+(argentina|españa|mexico|chile)\b', tit_low)
+                or re.search(r'\bISBN\b', tit_cand, re.IGNORECASE)
+            )
+            if not es_ruido_isbd:
                 ficha["titulo"] = tit_cand
-                ficha["autor"] = aut_cand
+                ficha["autor"] = _limpiar_autor(aut_cand)
 
         # ── 2. Título en línea propia: "El Principito. Segunda edición." ────────
         # Busca una línea que tenga «Título. [Algo] edición.» o «Título.» sola
@@ -157,7 +249,9 @@ class AgenteAnalizador:
                 re.MULTILINE,
             )
             if m_tit_solo:
-                ficha["titulo"] = m_tit_solo.group(1).strip()
+                tit_solo_cand = m_tit_solo.group(1).strip()
+                if not any(k in tit_solo_cand.lower() for k in RUIDO_ISBD):
+                    ficha["titulo"] = tit_solo_cand
 
         # ── 3. Autor CIP formato "Apellido, Nombre" (primera coincidencia válida) ─
         # Palabras que nunca son nombres de persona en un CIP
@@ -165,22 +259,25 @@ class AgenteAnalizador:
             "editorial", "traduccion", "traducción", "derechos", "edicion", "edición",
             "impreso", "hecho", "ciudad", "buenos", "barcelona", "madrid",
             "titulo", "título", "narrativa", "catalogacion", "catalogación",
+            "printed", "argentina", "españa", "mexico",
         }
         if not ficha.get("autor"):
             for m_aut in re.finditer(
-                r'^\s*([A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]+(?:\s+de)?),\s+'
-                r'([A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]+(?:\s+[A-ZÁÉÍÓÚÜÑa-záéíóúüñ]+){0,3})',
+                r'^\s*((?:de\s+|del\s+|von\s+|van\s+)?[A-ZÁÉÍÓÚÜÑ][A-Za-záéíóúüñ\s\-]+?),\s*'
+                r'([A-ZÁÉÍÓÚÜÑ][A-Za-záéíóúüñ\s\-\.]+?)(?:\n|$)',
                 texto,
                 re.MULTILINE,
             ):
                 apellido = m_aut.group(1).strip()
                 nombre   = m_aut.group(2).strip()
+                # Descartar si apellido o nombre son palabras de imprenta/ruido o contienen dígitos
                 if (
                     apellido.lower() not in PALABRAS_NO_PERSONA
                     and not any(w in PALABRAS_NO_PERSONA for w in nombre.lower().split())
+                    and not re.search(r"\d", apellido)
+                    and len(apellido) > 2
                 ):
-                    # Reconstruir «Nombre Apellido» (o «Nombre de Apellido»)
-                    ficha["autor"] = f"{nombre} {apellido}"
+                    ficha["autor"] = _limpiar_autor(f"{nombre} {apellido}")
                     break
 
         # ── 4. Editorial + Año: «Ciudad [Autónoma]: Editorial S.R.L., Año.» ────
@@ -198,16 +295,19 @@ class AgenteAnalizador:
                 ficha["editorial"] = ed_nombre
             ficha["anio"] = m_pub.group(2).strip()
 
-        # ── 5. Lugar de edición: «Ciudad [Autónoma] de Buenos Aires» ──────────
-        m_lugar = re.search(
-            r'^([A-ZÁÉÍÓÚÜÑ][A-Za-záéíóúüñ\s]+?)\s*:\s*[A-Za-záéíóúüñ]',
+        # ── 5. Lugar de edición: ÚNICAMENTE desde línea CIP «Ciudad : Editorial, Año.» ─
+        # No capturar desde direcciones de editorial (ej. "Barcelona" de "Av. Diagonal 662-664 Barcelona")
+        # El patrón exige que la ciudad venga ANTES de ": Editorial, Año" en la misma línea CIP
+        m_lugar_cip = re.search(
+            r'^((?:Ciudad\s+Autónoma\s+de\s+)?[A-ZÁÉÍÓÚÜÑ][A-Za-záéíóúüñ\s]+?)\s*:\s*'
+            r'[A-Za-zÁÉÍÓÚÜÑáéíóúüñ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ\s\.]+?,\s*\d{4}',
             texto,
             re.MULTILINE,
         )
-        if m_lugar:
-            lugar_cand = m_lugar.group(1).strip()
-            # Filtrar que no sea un título o nombre de persona
-            if 4 < len(lugar_cand) < 80 and not re.search(r'[/,]', lugar_cand):
+        if m_lugar_cip:
+            lugar_cand = m_lugar_cip.group(1).strip()
+            # Aceptar solo si parece un nombre de ciudad/localidad (no tiene comas, barras ni dígitos)
+            if 4 < len(lugar_cand) < 80 and not re.search(r'[/,\d]', lugar_cand):
                 ficha["lugar"] = lugar_cand
 
         # ── 6. Páginas: «96p.» o «312 p. ; 23 x 15 cm» ──────────────────────
@@ -222,11 +322,72 @@ class AgenteAnalizador:
             re.MULTILINE,
         )
         if m_mat:
-            genero_cand = m_mat.group(1).strip()
+            genero_cand = _normalizar_genero(m_mat.group(1).strip())
             if len(genero_cand) > 3:
                 ficha["genero"] = genero_cand
 
         return ficha
+
+    def _extraer_sinopsis(self, texto_ocr: str) -> tuple[str, int]:
+        """
+        Extrae la sinopsis íntegra analizando prioritariamente el bloque de contratapa.
+        Transcribe citas, reseñas y texto descriptivo, evitando devolver vacío/null si existe texto.
+        """
+        if not texto_ocr:
+            return "", 0
+
+        # 1. Buscar en el bloque identificado de CONTRATAPA
+        bloque_contratapa = ""
+        m_bloque = re.search(
+            r"===\s*CONTRATAPA\s*(?:/\s*SINOPSIS)?\s*===\s*\n?(.*?)(?:\n===|\Z)",
+            texto_ocr,
+            re.DOTALL | re.IGNORECASE,
+        )
+        if m_bloque:
+            bloque_contratapa = m_bloque.group(1).strip()
+
+        texto_a_analizar = bloque_contratapa or texto_ocr
+
+        # Filtrar líneas de ruido de imprenta / códigos de barras / ISBN
+        lineas_sinopsis: list[str] = []
+        for l in texto_a_analizar.split("\n"):
+            l_str = l.strip()
+            if not l_str:
+                continue
+            l_low = l_str.lower()
+            # Ignorar encabezados de sección
+            if l_str.startswith("===") or "portada" in l_low or "ficha catalográfica" in l_low:
+                continue
+            # Ignorar códigos de barras / ISBN / depósitos / códigos numéricos
+            if re.search(r"\b(?:isbn|ibic|cdu|depósito|deposito)\b", l_low):
+                continue
+            if re.match(r"^[\d\s\-X]{8,}$", l_str):
+                continue
+            # Ignorar créditos de traducción o notas de imprenta si están aisladas
+            if re.match(r"^(?:traducción|traduccion)\s+de\b", l_low) and len(l_str.split()) < 6:
+                continue
+            if len(l_str) < 3:
+                continue
+            # Ignorar encabezados visuales en mayúsculas (slogans/titulares de contratapa)
+            # Ej: "LA RIQUEZA NO ES FRUTO DE NUESTRA INTELIGENCIA, TALENTO O TRABAJO"
+            # Se identifican como líneas completamente en mayúsculas con 5 o más palabras
+            if l_str.isupper() and len(l_str.split()) >= 5:
+                continue
+            # Ignorar líneas que son solo el nombre del logo editorial aislado
+            if l_str.upper() == l_str and l_str.lower().strip() in EDITORIALES_CONOCIDAS:
+                continue
+            lineas_sinopsis.append(l_str)
+
+        # Limpiar línea final si es únicamente el logo o editorial (ej. 'ARTIFEX', 'PLANETA')
+        if lineas_sinopsis and lineas_sinopsis[-1].lower().strip() in EDITORIALES_CONOCIDAS:
+            lineas_sinopsis.pop()
+
+        if lineas_sinopsis:
+            sinopsis_limpia = " ".join(lineas_sinopsis).strip()
+            if len(sinopsis_limpia) > 25:
+                return sinopsis_limpia, 85 if bloque_contratapa else 70
+
+        return "", 0
 
     def procesar_texto_ocr(self, texto_ocr: str) -> dict[str, Any]:
         """
@@ -271,6 +432,9 @@ class AgenteAnalizador:
             resultado["paginas"] = {"valor": cip["paginas"], "confianza": 92, "fuente": "CIP"}
         if cip.get("genero"):
             resultado["genero"] = {"valor": cip["genero"], "confianza": 90, "fuente": "CIP"}
+        # Lugar de edición desde CIP
+        if cip.get("lugar"):
+            resultado["lugar"] = {"valor": cip["lugar"], "confianza": 92, "fuente": "CIP"}
 
         # 1. ISBN — Extracción tolerante a errores OCR
         isbn_valor, isbn_confianza = self._extraer_isbn(texto_ocr)
@@ -309,10 +473,17 @@ class AgenteAnalizador:
             if titulo_valor:
                 resultado["titulo"] = {"valor": titulo_valor, "confianza": titulo_confianza}
 
-        # 7. Lugar de edición
-        lugar_valor, lugar_confianza = self._extraer_lugar(texto_ocr)
-        if lugar_valor:
-            resultado["lugar"] = {"valor": lugar_valor, "confianza": lugar_confianza}
+        # 7. Lugar de edición (solo si no fue ya asignado desde CIP)
+        if not resultado["lugar"]["valor"]:
+            lugar_valor, lugar_confianza = self._extraer_lugar(texto_ocr)
+            if lugar_valor:
+                resultado["lugar"] = {"valor": lugar_valor, "confianza": lugar_confianza}
+
+        # 8. Sinopsis (analizando bloque de contratapa / párrafos descriptivos)
+        if not resultado["sinopsis"]["valor"]:
+            sinopsis_val, sinopsis_conf = self._extraer_sinopsis(texto_ocr)
+            if sinopsis_val:
+                resultado["sinopsis"] = {"valor": sinopsis_val, "confianza": sinopsis_conf}
 
         return resultado
 
@@ -403,41 +574,45 @@ class AgenteAnalizador:
         return "", 0
 
     def _extraer_lugar(self, texto: str) -> tuple[str, int]:
-        """Extrae el lugar de edición (Ciudad, País)."""
+        """Extrae el lugar de edición (Ciudad) priorizando la línea CIP."""
         if not texto:
             return "", 0
-        ciudad = ""
-        pais = ""
 
-        # Ciudad por código postal o mención directa
-        m_cp = re.search(r'\b\d{4,5}\s*-\s*([A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+)', texto)
-        if m_cp:
-            ciudad = m_cp.group(1).strip()
-        elif re.search(r'\bmadrid\b', texto, re.IGNORECASE):
-            ciudad = "Madrid"
-        elif re.search(r'\bbuenos aires\b', texto, re.IGNORECASE):
-            ciudad = "Buenos Aires"
-        elif re.search(r'\bbarcelona\b', texto, re.IGNORECASE):
-            ciudad = "Barcelona"
-        elif re.search(r'\bméxico|mexico d\.?f\.?|ciudad de méxico\b', texto, re.IGNORECASE):
-            ciudad = "Ciudad de México"
+        # Prioridad 1: Línea CIP completa «Ciudad Autónoma de Buenos Aires : Editorial, Año»
+        m_cip = re.search(
+            r'^((?:Ciudad\s+Autónoma\s+de\s+Buenos\s+Aires|Buenos\s+Aires|Rosario|Córdoba|Mendoza|'
+            r'Ciudad\s+de\s+México|Bogotá|Santiago|Lima|Madrid|Barcelona)[A-Za-záéíóúüñ\s]*?)'
+            r'\s*:\s*[A-Za-zÁÉÍÓÚÜÑáéíóúüñ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ\s\.]+?,\s*\d{4}',
+            texto,
+            re.MULTILINE,
+        )
+        if m_cip:
+            lugar_cip = m_cip.group(1).strip()
+            if 4 < len(lugar_cip) < 80 and not re.search(r'[/,\d]', lugar_cip):
+                return lugar_cip, 92
 
-        # País
-        if re.search(r'impreso en españa|printed in spain|españa', texto, re.IGNORECASE):
-            pais = "España"
-        elif re.search(r'impreso en (?:la )?argentina|printed in argentina|argentina', texto, re.IGNORECASE):
-            pais = "Argentina"
-        elif re.search(r'impreso en méxico|méxico|mexico', texto, re.IGNORECASE):
-            pais = "México"
-        elif re.search(r'colombia', texto, re.IGNORECASE):
-            pais = "Colombia"
+        # Prioridad 2: Buscar "Publicado bajo el sello X / Av. X, Ciudad"
+        # o patrón "Av. X, CABA / Ciudad Autónoma"
+        m_caba = re.search(r'\b(Ciudad\s+Autónoma\s+de\s+Buenos\s+Aires|C\.?\s*A\.?\s*B\.?\s*A\.?)\b', texto, re.IGNORECASE)
+        if m_caba:
+            return "Ciudad Autónoma de Buenos Aires", 88
 
-        if ciudad and pais:
-            return f"{ciudad}, {pais}", 92
-        if ciudad:
-            return ciudad, 80
-        if pais:
-            return pais, 75
+        # Prioridad 3: Solo ciudad (sin combinar con país para evitar "Barcelona, Argentina")
+        # Ignorar "Barcelona" si también hay "Argentina" (evitar mezclar ciudad española con país argentino)
+        hay_argentina = bool(re.search(r'\bargentina\b', texto, re.IGNORECASE))
+        hay_barcelona = bool(re.search(r'\bbarcelona\b', texto, re.IGNORECASE))
+
+        if not (hay_barcelona and hay_argentina):
+            if re.search(r'\bmadrid\b', texto, re.IGNORECASE):
+                return "Madrid", 80
+            if re.search(r'\bbarcelona\b', texto, re.IGNORECASE):
+                return "Barcelona", 80
+
+        if re.search(r'\bbuenos aires\b', texto, re.IGNORECASE):
+            return "Buenos Aires", 75
+        if re.search(r'\bméxico|mexico d\.?f\.?|ciudad de méxico\b', texto, re.IGNORECASE):
+            return "Ciudad de México", 75
+
         return "", 0
 
     def _extraer_paginas(self, texto: str) -> tuple[str, int]:
@@ -460,8 +635,25 @@ class AgenteAnalizador:
         return "", 0
 
     def _extraer_editorial(self, lineas: list[str], texto_ocr: str = "", autor_candidato: str = "") -> tuple[str, int]:
-        """Editorial — CIP + mención de sello + lista de conocidas + pattern copyright."""
-        # 1. Buscar en Ficha CIP: ": Editorial, Año" o ": Editorial."
+        """
+        Editorial — Da prioridad al sello o logo que aparece en la portada o en la página
+        de legales/derechos de autor de la edición física actual visible.
+        """
+        # 1. Buscar mención de última edición física: e.g. "Quinta edición y primera edición en Artifex: octubre de 2016"
+        cand_edicion = ""
+        if texto_ocr:
+            for m in re.finditer(
+                r'(?:primera\s+edición|segunda\s+edición|tercera\s+edición|cuarta\s+edición|quinta\s+edición|\d+[aª]\s+edición|edición)\s+en\s+([A-Za-zÁÉÍÓÚÜÑáéíóúüñ\s]+?)(?:\s*\([^\)]*\))?\s*:',
+                texto_ocr,
+                re.IGNORECASE,
+            ):
+                cand = m.group(1).strip()
+                if len(cand) > 2 and cand.lower() not in ("rústica", "rustica", "cartoné", "cartone", "tapa"):
+                    cand_edicion = _capitalizar(cand)
+        if cand_edicion:
+            return cand_edicion, 94
+
+        # 2. Buscar en Ficha CIP: ": Editorial S.R.L., Año" o ": Editorial."
         if texto_ocr:
             m_cip = re.search(r':\s*([A-Za-zÁÉÍÓÚÜÑáéíóúüñ\s\.]+?),\s*\d{4}', texto_ocr)
             if m_cip:
@@ -469,15 +661,23 @@ class AgenteAnalizador:
                 if 2 < len(ed) < 40 and not any(k in ed.lower() for k in ["ciudad", "buenos aires", "argentina", "españa"]):
                     return _capitalizar(ed), 92
 
-        # 2. Buscar "edición en [Editorial]"
+        # 3. Pattern: © [Año] [Editorial] (descartando si es el autor o el traductor)
         if texto_ocr:
-            m_ed_en = re.search(r'edición en\s+([A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+)', texto_ocr, re.IGNORECASE)
-            if m_ed_en:
-                cand = m_ed_en.group(1).strip()
-                if len(cand) > 2 and cand.lower() not in ("rústica", "rustica", "cartoné", "cartone", "tapa"):
-                    return _capitalizar(cand), 92
+            for m in re.finditer(r"©\s*(19[89]\d|20[0-2]\d)\s*,?\s*([A-Za-zÁÉÍÓÚÜÑáéíóúüñ\s\.,]+)", texto_ocr, re.IGNORECASE):
+                ed_cand = m.group(2).strip().split("\n")[0].rstrip(",.")
+                ed_low = ed_cand.lower()
+                if any(k in ed_low for k in ["traducción", "traduccion", "derechos", "arrangement", "literary", "agency", "esta edición"]):
+                    continue
+                if autor_candidato and any(
+                    token in ed_low
+                    for token in autor_candidato.lower().split()
+                    if len(token) > 3
+                ):
+                    continue
+                if 2 < len(ed_cand) < 40:
+                    return _capitalizar(ed_cand), 90
 
-        # 3. Menciones explícitas de sello o editorial
+        # 4. Menciones explícitas de sello o editorial
         if texto_ocr:
             m_sello = re.search(
                 r"(?:sello|editorial|grupo editorial|publicado por)\s+([A-Za-zÁÉÍÓÚÜÑáéíóúüñ\s]+?)(?:®|©|\.|\n|,|$)",
@@ -487,25 +687,7 @@ class AgenteAnalizador:
             if m_sello:
                 ed = m_sello.group(1).strip()
                 if 2 < len(ed) < 40 and not any(k in ed.lower() for k in ["derechos", "harriman"]):
-                    return _capitalizar(ed), 90
-
-        # 4. Pattern: © [Año] [Editorial] (descartando si es el autor o el traductor)
-        if texto_ocr:
-            for m in re.finditer(r"©\s*(\d{4})\s*,?\s*([A-Za-zÁÉÍÓÚÜÑáéíóúüñ\s\.,]+)", texto_ocr, re.IGNORECASE):
-                ed_cand = m.group(2).strip().split("\n")[0].rstrip(",.")
-                ed_low = ed_cand.lower()
-                if any(k in ed_low for k in ["traducción", "traduccion", "derechos", "arrangement", "literary", "agency"]):
-                    continue
-                # Si coincide con nombres conocidos de autor, omitir
-                # Si el candidato coincide con el autor ya detectado, no es una editorial
-                if autor_candidato and any(
-                    token in ed_low
-                    for token in autor_candidato.lower().split()
-                    if len(token) > 3
-                ):
-                    continue
-                if 2 < len(ed_cand) < 40:
-                    return _capitalizar(ed_cand), 88
+                    return _capitalizar(ed), 88
 
         # 5. Lista de conocidas en las líneas
         for linea in lineas:
@@ -518,18 +700,13 @@ class AgenteAnalizador:
 
     def _extraer_autor(self, lineas: list[str]) -> tuple[str, int]:
         """Autor — patrón nombre propio en primeras líneas. Rechaza ruido de imprenta."""
-        # Palabras que nunca forman parte de un nombre de autor
         FRAGMENTOS_NO_AUTOR = {
-            # Países / ciudades
             "argentina", "españa", "spain", "mexico", "colombia", "chile",
-            "brazil", "brasil", "peru", "peru", "madrid", "barcelona",
+            "brazil", "brasil", "peru", "madrid", "barcelona",
             "buenos aires", "avellaneda",
-            # Verbos de imprenta
             "printed", "impreso", "hecho", "print",
-            # Roles editoriales
             "editorial", "editor", "traductor", "traduccion", "traducción",
             "ilustrador", "derechos", "edicion", "edición",
-            # Títulos de libros ajenos que aparecen en contratapa
             "habitos atomicos", "hábitos atómicos",
         }
 
@@ -543,13 +720,10 @@ class AgenteAnalizador:
                 continue
             l_low = linea.lower().strip()
 
-            # Rechazar si contiene cualquier fragmento de no-autor
             if any(k in l_low for k in FRAGMENTOS_NO_AUTOR):
                 continue
-            # Rechazar líneas con dígitos (son datos de imprenta, códigos, etc.)
             if re.search(r"\d", linea):
                 continue
-            # Rechazar líneas que comienzan con verbo/preposición o tienen signos de puntuación
             if re.match(r"^(el |la |los |las |de |del |en |por |para |con )", l_low):
                 continue
             if re.search(r"[©®:;@/\\%]", linea):
@@ -559,22 +733,31 @@ class AgenteAnalizador:
 
             if patron_nombre_propio.match(linea) and len(linea) < 60:
                 if not autor_encontrado or len(linea.split()) >= 2:
-                    autor_encontrado = linea
+                    autor_encontrado = _limpiar_autor(linea)
             elif linea.isupper() and 5 < len(linea) < 40 and len(linea.split()) in (2, 3):
                 if not autor_encontrado:
-                    autor_encontrado = linea.title()
+                    autor_encontrado = _limpiar_autor(linea)
 
         return (autor_encontrado, 85) if autor_encontrado else ("", 0)
 
     def _es_ruido_ocr(self, s: str) -> bool:
-        """Detecta si una línea es ruido OCR, datos de imprenta o texto no bibliográfico."""
+        """Detecta si una línea es ruido OCR, delimitadores de sección, datos de imprenta o texto no bibliográfico."""
         if not s:
             return True
         s_stripped = s.strip()
         s_low = s_stripped.lower()
 
+        # Delimitadores de sección y placeholders de captura
+        if "===" in s_stripped or any(
+            p in s_low for p in [
+                "portada / tapa", "portada", "tapa del libro", "ficha catalográfica",
+                "contratapa", "desconocido", "sin título", "sin titulo"
+            ]
+        ):
+            return True
+
         # Demasiado corto
-        if len(s_low) < 4:
+        if len(s_low) < 3:
             return True
 
         # Citas textuales (entre comillas)
@@ -589,7 +772,7 @@ class AgenteAnalizador:
         if re.match(r"^(printed|impreso|hecho|print)\s+(in|en)\s+", s_low):
             return True
 
-        # Líneas que solo contienen números/letras sueltas cortas (códigos, ISBN parcial, etc.)
+        # Líneas que solo contienen números/letras sueltas cortas
         if re.match(r"^[a-z0-9\s]{1,7}$", s_low, re.IGNORECASE):
             return True
 
@@ -597,7 +780,7 @@ class AgenteAnalizador:
         if re.search(r"[©®@#|]", s_stripped):
             return True
 
-        # Líneas que comienzan con dígito (códigos postales, ISBNs, teléfonos)
+        # Líneas que comienzan con dígito
         if re.match(r"^\d", s_stripped):
             return True
 
@@ -605,23 +788,24 @@ class AgenteAnalizador:
         if re.search(r"\.(com|org|es|ar|net|io|edu)\b|@", s_low):
             return True
 
-        # Texto en minúscula con más de 6 palabras → probable sinopsis/blurb, no título ni autor
+        # Texto en minúscula con más de 6 palabras → probable sinopsis/blurb
         if re.match(r"^[a-záéíóúüñ]", s_stripped) and len(s_stripped.split()) > 6:
             return True
 
         return False
 
-
     def _extraer_titulo(self, lineas: list[str], autor_valor: str) -> tuple[str, int]:
-        """Título — busca el título principal filtrando ruido y datos de imprenta."""
-        # Fragmentos que no pueden ser parte de un título legítimo
+        """Título — busca el título principal filtrando ruido, delimitadores y datos de imprenta."""
         FRAGMENTOS_NO_TITULO = [
+            "===", "portada", "tapa", "desconocido", "sin título", "sin titulo",
             "printed", "impreso", "hecho en", "print in",
             "argentina", "españa", "spain", "mexico",
             "reservados", "prohibida", "derechos",
             "editorial", "traducc", "isbn", "ibic", "cdu",
             "queda", "permiso", "licencia",
+            "saga", "saga de", "colección", "serie",
         ]
+        tokens_autor = [t.lower() for t in re.findall(r"[A-Za-zÁÉÍÓÚÜÑáéíóúüñ]{3,}", autor_valor)]
 
         def _es_titulo_valido(linea: str) -> bool:
             """Retorna True si la línea puede ser un título de libro."""
@@ -630,23 +814,26 @@ class AgenteAnalizador:
             l_low = linea.lower().strip()
             if any(f in l_low for f in FRAGMENTOS_NO_TITULO):
                 return False
-            # Rechazar si contiene solo números o fragmentos con dígitos al inicio
+            if any(ed in l_low for ed in EDITORIALES_CONOCIDAS):
+                return False
             if re.match(r"^[\d\s]+$", linea):
                 return False
-            # Rechazar si tiene más de 12 palabras (probable sinopsis)
             if len(linea.split()) > 12:
                 return False
-            # Rechazar si coincide con el autor
-            if autor_valor and autor_valor.lower().strip() in l_low:
+            if tokens_autor and any(tok in l_low for tok in tokens_autor):
                 return False
             return True
 
-        # 1. Buscar líneas en MAYÚSCULAS consecutivas (ej: EL TITULO \n DEL LIBRO)
+        # 1. Buscar líneas en MAYÚSCULAS consecutivas
         lineas_mayus: list[str] = []
         for l in lineas[:15]:
             if not _es_titulo_valido(l):
+                if lineas_mayus:
+                    break
                 continue
             if len(l) > 60:
+                if lineas_mayus:
+                    break
                 continue
             if l.isupper() and len(l) > 3 and not re.search(r"\d", l):
                 lineas_mayus.append(l)
@@ -655,10 +842,9 @@ class AgenteAnalizador:
 
         if lineas_mayus:
             titulo_compuesto = " ".join(lineas_mayus).strip()
-            titulo_formateado = titulo_compuesto.title() if len(titulo_compuesto) > 4 else titulo_compuesto
-            return titulo_formateado, 85
+            return (titulo_compuesto.title() if len(titulo_compuesto) > 4 else titulo_compuesto), 85
 
-        # 2. Fallback: primeras líneas válidas que no sean ruido ni el autor
+        # 2. Fallback: primeras líneas válidas
         posibles = [l for l in lineas[:10] if _es_titulo_valido(l) and len(l) < 100]
         if posibles:
             return posibles[0], 65
@@ -711,42 +897,38 @@ class AgenteAnalizador:
         )
 
         prompt = (
-            "Eres un asistente bibliotecario experto. Analiza el siguiente texto extraído por OCR de un libro "
+            "Eres un asistente bibliotecario experto de alta precisión. Analiza el siguiente texto extraído por OCR de un libro "
             "(que incluye bloques identificados: PORTADA/TAPA, FICHA CATALOGRÁFICA/INTERIOR y CONTRATAPA) "
-            "y extrae los campos editoriales estructurados.\n\n"
-            "REGLA FUNDAMENTAL DE LITERALIDAD (CERO ALUCINACIONES):\n"
-            "Queda TERMINANTEMENTE PROHIBIDO inventar, suponer o asociar de memoria títulos o autores por afinidad temática. "
-            "Cada dato extraído DEBE corresponder a palabras impresas que existan de forma literal en el texto OCR suministrado.\n\n"
-            "CRITERIOS ESTRUCTURALES Y POSICIONALES DE EXTRACCIÓN:\n\n"
+            "y extrae los campos editoriales estructurados en formato JSON.\n\n"
+            "REGLAS ESTRICTAS DE CORRECCIÓN Y EXTRACCIÓN (OBLIGATORIO):\n\n"
             "1. TÍTULO (\"titulo\"):\n"
-            "   - DEBE EXTRAERSE OBLIGATORIAMENTE DEL BLOQUE '=== PORTADA / TAPA DEL LIBRO ==='.\n"
-            "   - Es el NOMBRE PROPIO DE LA OBRA, ubicado en la parte central destacada de la portada. A menudo ocupa múltiples líneas consecutivas por diseño (ej. cuando el título está dividido en varias líneas, debes unirlas en una sola frase coherente).\n"
-            "   - DISTINCIÓN CRÍTICA CON LA EDITORIAL: En la portada suele figurar el sello o logo editorial al pie o en los márgenes. NUNCA asignes el nombre de la editorial o marca como título del libro. El campo 'titulo' y el campo 'editorial' jamás pueden tener el mismo valor.\n"
-            "   - DISTINCIÓN CON EL AUTOR: El nombre del autor (habitualmente arriba o debajo del título) NO forma parte del título.\n"
-            "   - Excluye nombres de sagas, series, universos o ciclos secundarios (patrones con palabras como 'saga', 'colección', 'serie', 'ciclo', 'universo', 'volumen', 'tomo').\n"
-            "   - Si la ficha interior indica un título original en otro idioma (patrón 'Título original:'), mantén el título en español presente en la portada.\n\n"
-            "2. AUTOR (\"autor\"):\n"
-            "   - DEBE EXTRAERSE OBLIGATORIAMENTE DEL BLOQUE '=== PORTADA / TAPA DEL LIBRO ==='.\n"
-            "   - Transcribe el nombre propio de la persona autora destacada en la portada. Limpia puntos o signos parásitos del OCR.\n"
-            "   - NUNCA tomes nombres asociados a roles secundarios (patrones como 'traducción de', 'traductor', 'ilustraciones de', 'prólogo de', 'reseña de').\n"
-            "   - Excluye nombres de sellos editoriales o ciudades.\n\n"
-            "3. EDITORIAL (\"editorial\"):\n"
-            "   - Nombre del sello o empresa editorial presente en el pie de la portada o en la ficha técnica/página de créditos (frecuentemente tras el patrón 'Ciudad: Editorial' o precedido por términos como 'Editorial', 'Ediciones' o sellos de publicación).\n"
-            "   - Extrae únicamente el nombre limpio de la editorial, omitiendo ciudades, direcciones y códigos postales.\n\n"
-            "4. AÑO (\"anio\"):\n"
-            "   - Cadena de 4 dígitos correspondiente al año de la edición física actual. En la ficha técnica, selecciona siempre la fecha de la tirada o reimpresión más reciente, descartando años anteriores correspondientes a copyrights históricos o primeras ediciones ya superadas.\n\n"
-            "5. ISBN (\"isbn\"):\n"
-            "   - Identificador numérico de 10 o 13 dígitos detectado en la ficha técnica o código de barras.\n\n"
-            "6. PÁGINAS (\"paginas\"):\n"
-            "   - Número total de páginas de la obra, identificado en la ficha por valores numéricos seguidos de abreviaturas como 'p.', 'pág.', 'págs.' o descriptores de paginación.\n\n"
-            "7. GÉNERO (\"genero\"):\n"
-            "   - Clasificación temática o materia bibliográfica principal de la obra.\n\n"
-            "8. SINOPSIS (\"sinopsis\"):\n"
-            "   - Redacción descriptiva en español de 2 a 4 oraciones sobre el argumento o contenido temático de la obra, basada en el texto de la contratapa si existe.\n\n"
-            "Todas las reglas anteriores son criterios estrictamente estructurales y de patrones de texto universales. Aplica estos criterios con total rigurosidad.\n\n"
-            "Devuelve ÚNICAMENTE un objeto JSON válido con las siguientes claves obligatorias:\n"
-            "{\"titulo\": \"...\", \"autor\": \"...\", \"editorial\": \"...\", \"anio\": \"...\", \"isbn\": \"...\", \"paginas\": \"...\", \"genero\": \"...\", \"sinopsis\": \"...\"}\n\n"
-            "Si no puedes determinar un campo con certeza a partir de los criterios dados, asigna una cadena vacía \"\".\n\n"
+            "   - NUNCA insertes marcadores de posición, delimitadores de sección ni textos como '=== Portada / Tapa Del Libro ===', 'Portada', 'Desconocido' o 'Sin Título'.\n"
+            "   - El título DEBE ser el nombre real de la obra tal como aparece impreso en la tapa o en la portada interior.\n"
+            "   - Si el título en la tapa está dividido en múltiples líneas, únelas en una sola frase coherente.\n"
+            "   - NUNCA incluyas nombres de sagas, series, universos, subtítulos de colección ni el nombre del autor dentro del título.\n"
+            "   - El campo 'titulo' y el campo 'editorial' jamás pueden tener el mismo valor.\n\n"
+            "2. SINOPSIS (\"sinopsis\"):\n"
+            "   - Analiza siempre el bloque de CONTRATAPA (parte trasera del libro).\n"
+            "   - Transcribe ÍNTEGRAMENTE el texto descriptivo, reseña, cita o fragmento promocional que aparece en la contratapa.\n"
+            "   - NUNCA lo dejes en \"\" o null si hay texto visible en la contratapa.\n\n"
+            "3. AUTOR (\"autor\"):\n"
+            "   - Extrae el nombre propio de la persona autora destacada.\n"
+            "   - Limpia el formato de los nombres: elimina puntos innecesarios o mayúsculas sostenidas rígidas (ejemplo: convierte mayúsculas a formato de nombre propio limpio).\n"
+            "   - NUNCA tomes nombres de traductores, ilustradores, prologuistas o editores.\n\n"
+            "4. EDITORIAL (\"editorial\"):\n"
+            "   - Da prioridad estricta al sello o editorial de la edición física actual visible en la portada o en la página de legales/derechos de autor.\n"
+            "   - En historiales con múltiples ediciones pasadas, selecciona siempre el sello de la edición actual más reciente.\n"
+            "   - Extrae solo el nombre limpio de la editorial, omitiendo ciudades, direcciones o códigos postales.\n\n"
+            "5. GÉNERO (\"genero\"):\n"
+            "   - En lugar de géneros genéricos en inglés como 'Fiction' o 'Juvenile Nonfiction', infiere o extrae una categoría bibliográfica precisa en español según el contexto del libro (ejemplos: 'Literatura Fantástica', 'Narrativa Francesa', 'Finanzas Personales', 'Ciencia Ficción', 'Desarrollo Personal', 'Infantil / Juvenil', etc.).\n\n"
+            "6. PORTADA (\"portada\"):\n"
+            "   - Cuando se procesa directamente por OCR y no proviene de una API de búsqueda externa, asigna SIEMPRE una cadena vacía \"\" (en lugar de inventar o autogenerar enlaces).\n\n"
+            "7. AÑO (\"anio\"), ISBN (\"isbn\"), PÁGINAS (\"paginas\"):\n"
+            "   - anio: Año de 4 dígitos de la edición/impresión física más reciente.\n"
+            "   - isbn: Número de 10 o 13 dígitos limpio (sin guiones).\n"
+            "   - paginas: Número entero de páginas de la obra.\n\n"
+            "Devuelve ÚNICAMENTE un objeto JSON válido con las siguientes claves:\n"
+            "{\"titulo\": \"...\", \"autor\": \"...\", \"editorial\": \"...\", \"anio\": \"...\", \"isbn\": \"...\", \"paginas\": \"...\", \"genero\": \"...\", \"sinopsis\": \"...\", \"portada\": \"\"}\n\n"
             f"Texto OCR:\n\"\"\"\n{texto_ocr[:3500]}\n\"\"\""
         )
 
@@ -803,9 +985,13 @@ class AgenteAnalizador:
             def _es_val_ruidoso(campo: str, val: str) -> bool:
                 if not val or val in ("a", "—"):
                     return True
+                v = val.lower().strip()
+                if any(m in v for m in [
+                    "===", "portada / tapa", "portada", "tapa del libro",
+                    "ficha catalográfica", "contratapa", "desconocido", "sin título", "sin titulo",
+                ]):
+                    return True
                 if campo == "titulo":
-                    v = val.lower().strip()
-                    # El título nunca puede ser idéntico o contener solo la editorial o el autor
                     if ed_propuesta and (v == ed_propuesta or v in ed_propuesta or ed_propuesta in v):
                         return True
                     if aut_propuesto and (v == aut_propuesto or v in aut_propuesto):
@@ -819,20 +1005,16 @@ class AgenteAnalizador:
                         or "fruto de nuestro" in v
                         or len(val) > 100
                         or (val.count(",") + val.count("|") + val.count("/")) >= 3
-                        or len(val) < 4
+                        or len(val) < 2
                     )
                     return es_direccion or es_eslogan
                 return False
 
-            # Ollama activo → fuente de verdad primaria para todos los campos.
-            # Siempre aplica el valor de Ollama (ignorando confianza de regex/CIP),
-            # salvo que el propio valor de Ollama sea ruidoso.
             campos = ["titulo", "autor", "editorial", "anio", "isbn", "paginas", "genero", "sinopsis"]
             for campo in campos:
                 val_ollama: str = str(parsed.get(campo) or "").strip()
 
                 if not val_ollama:
-                    # Ollama no devolvió nada para este campo → conservar regex/CIP
                     continue
 
                 if campo == "titulo" and _es_val_ruidoso("titulo", val_ollama):
@@ -844,9 +1026,7 @@ class AgenteAnalizador:
 
                 # Limpieza cosmética de autor
                 if campo == "autor":
-                    val_ollama = re.sub(r"\s*\.\s*", " ", val_ollama).strip()
-                    if val_ollama.isupper() and len(val_ollama) > 3:
-                        val_ollama = val_ollama.title()
+                    val_ollama = _limpiar_autor(val_ollama)
 
                 # Limpieza cosmética de título
                 if campo == "titulo":
@@ -857,40 +1037,24 @@ class AgenteAnalizador:
                 if campo == "isbn":
                     val_ollama = re.sub(r"[^0-9X]", "", val_ollama.upper())
 
+                # Normalización de género
+                if campo == "genero":
+                    val_ollama = _normalizar_genero(val_ollama)
+
                 resultado[campo] = {"valor": val_ollama, "confianza": 90, "fuente": "IA_local"}
                 logger.debug(
-                    "[AgenteAnalizador-Ollama] Campo \"%s\" establecido por Ollama (fuente primaria): \"%s\"",
+                    "[AgenteAnalizador-Ollama] Campo \"%s\" establecido por Ollama: \"%s\"",
                     campo, val_ollama,
                 )
 
-            # (Deducción contextual específica eliminada — el campo título queda con la
-            #  confianza asignada por Ollama o regex; la API externa es la capa siguiente.)
-
-            # Normalización de género
-            genero_val = (resultado.get("genero") or {}).get("valor", "")
-            if genero_val:
-                g_low = genero_val.lower()
-                if any(k in g_low for k in ["finanza", "econom", "dinero", "invers"]):
-                    resultado["genero"]["valor"] = "Finanzas / Economía"
-                elif any(k in g_low for k in ["desarrollo", "autoayuda", "superacion", "personal"]):
-                    resultado["genero"]["valor"] = "Desarrollo Personal"
-                elif "ciencia ficc" in g_low:
-                    resultado["genero"]["valor"] = "Ciencia Ficción"
-                elif "historia" in g_low or "ensayo" in g_low:
-                    resultado["genero"]["valor"] = "Historia / Ensayo"
-
-            # Fallback genérico de sinopsis: construir desde párrafos del OCR
+            # Fallback de sinopsis si Ollama no extrajo o dejó vacío
             sinopsis_val = (resultado.get("sinopsis") or {}).get("valor", "")
-            if (not sinopsis_val or len(sinopsis_val) < 15) and texto_ocr and len(texto_ocr) > 50:
-                parrafos = [
-                    p for p in texto_ocr.split("\n\n")
-                    if len(p) > 40 and "ISBN" not in p and "©" not in p and "www." not in p
-                ]
-                if parrafos:
-                    sinopsis_limpia = re.sub(r"\s+", " ", " ".join(parrafos)).strip()[:350]
+            if not sinopsis_val or len(sinopsis_val) < 15:
+                sin_fallback, conf_fb = self._extraer_sinopsis(texto_ocr)
+                if sin_fallback:
                     resultado["sinopsis"] = {
-                        "valor": sinopsis_limpia,
-                        "confianza": 75,
+                        "valor": sin_fallback,
+                        "confianza": conf_fb,
                         "fuente": "OCR_Sintetizado",
                     }
 
@@ -915,7 +1079,7 @@ class AgenteAnalizador:
         Consulta APIs externas (Google Books / OpenLibrary), aplica la Regla
         de Fuentes y prueba IA Local si persisten vacíos.
 
-        Orden de prioridad (mismo que el JS original):
+        Orden de prioridad:
           1. Enriquecimiento con Ollama (extrae/corrige campos y ISBN).
           2. Enriquecimiento con API externa (validación oficial por ISBN).
           3. Regla contextual de respaldo.
@@ -971,11 +1135,11 @@ class AgenteAnalizador:
         return enriquecido
 
     def _es_ruido_api(self, val: str, autor_candidato: str = "") -> bool:
-        """Detecta valores ruidosos en datos de API (misma lógica JS)."""
+        """Detecta valores ruidosos en datos de API."""
         if not val:
             return True
         v = val.lower().strip()
-        if len(v) < 5:
+        if len(v) < 3:
             return True
         if v[0] in ("—", "-", "~", "|"):
             return True
@@ -1014,7 +1178,7 @@ class AgenteAnalizador:
                                 "editorial": v.get("publisher", ""),
                                 "anio": str(v.get("publishedDate", ""))[:4] or "",
                                 "paginas": str(v.get("pageCount", "")) if v.get("pageCount") else "",
-                                "genero": ", ".join(v.get("categories", [])) if v.get("categories") else "",
+                                "genero": _normalizar_genero(", ".join(v.get("categories", []))) if v.get("categories") else "",
                                 "sinopsis": v.get("description", ""),
                                 "portada": (v.get("imageLinks") or {}).get("thumbnail", ""),
                             }
@@ -1055,7 +1219,7 @@ class AgenteAnalizador:
         api_data: dict[str, Any],
         datos_ocr: dict[str, Any],
     ) -> dict[str, Any]:
-        """Aplica las Reglas de Fuentes del JS original sobre los datos de API."""
+        """Aplica las Reglas de Fuentes sobre los datos de API."""
         autor_candidato: str = (enriquecido.get("autor") or {}).get("valor", "")
 
         def _es_ruido(v: str) -> bool:
@@ -1071,14 +1235,13 @@ class AgenteAnalizador:
         autor_act_conf = (enriquecido.get("autor") or {}).get("confianza", 0)
         autor_act_val = (enriquecido.get("autor") or {}).get("valor", "")
         if api_data.get("autor") and (_es_ruido(autor_act_val) or autor_act_conf <= 75 or not autor_act_val):
-            # Limpiar traductores o ilustradores que las APIs a veces mezclan en authors
             autores_raw = [a.strip() for a in api_data["autor"].split(",") if a.strip()]
             autores_filtrados = []
             for a in autores_raw:
                 if any(t in a.lower() for t in ["faraldo", "traductor", "translator", "ilustrador", "illustrator"]):
                     continue
                 autores_filtrados.append(a)
-            autor_final = ", ".join(autores_filtrados) if autores_filtrados else api_data["autor"]
+            autor_final = _limpiar_autor(", ".join(autores_filtrados) if autores_filtrados else api_data["autor"])
             enriquecido["autor"] = {"valor": autor_final, "confianza": 98, "fuente": "API_Oficial"}
             logger.info('[AgenteAnalizador] ✅ Autor validado por ISBN desde API Oficial: "%s"', autor_final)
 
@@ -1110,15 +1273,19 @@ class AgenteAnalizador:
             )
 
         # 4. Campos complementarios: Sinopsis, Género, Editorial, Portada
+        genero_api = _normalizar_genero(api_data.get("genero") or "")
         campos_complementarios: list[tuple[str, Any, int]] = [
             ("sinopsis", api_data.get("sinopsis"), 90),
-            ("genero", api_data.get("genero"), 85),
+            ("genero", genero_api, 85),
             ("portada", api_data.get("portada"), 95),
             ("editorial", api_data.get("editorial"), 85),
         ]
         for campo, valor, conf in campos_complementarios:
             act = enriquecido.get(campo) or {}
             act_val = act.get("valor", "")
+            # Para portada, solo asignar si la API trajo una URL real
+            if campo == "portada" and not valor:
+                continue
             if valor and (not act_val or _es_ruido(act_val)):
                 enriquecido[campo] = {"valor": valor, "confianza": conf, "fuente": "API_Oficial"}
                 logger.debug('[AgenteAnalizador] Campo enriquecido por API: "%s" -> "%s"', campo, valor)
