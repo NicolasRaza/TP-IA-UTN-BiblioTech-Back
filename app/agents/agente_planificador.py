@@ -52,7 +52,7 @@ class AgentePlanificador:
     # Ciclo principal
     # ------------------------------------------------------------------
 
-    def correr(self) -> list[dict[str, Any]]:
+    async def correr(self) -> list[dict[str, Any]]:
         """
         Ejecuta el ciclo de orquestación operativa.
 
@@ -73,19 +73,20 @@ class AgentePlanificador:
         hoy = datetime.now(timezone.utc)
 
         # ── Paso 1: Reservas expiradas ─────────────────────────────────
-        decisiones_reservas = self._evaluador.evaluar_reservas_expiradas()
+        decisiones_reservas = await self._evaluador.evaluar_reservas_expiradas()
         for d in decisiones_reservas:
             # Actualizar el estado de la reserva a 'vencida' via el repositorio
-            self._repo.reservas.cancelar(d["reservaId"])
+            await self._repo.reservas.cancelar(d["reservaId"])
             # Recuperar la reserva actualizada para el detalle de alerta
+            reservas_all = await self._repo.reservas.get_all()
             reserva_obj = next(
-                (r for r in self._repo.reservas.get_all() if r["id"] == d["reservaId"]),
+                (r for r in reservas_all if r["id"] == d["reservaId"]),
                 {"id": d["reservaId"], "estado": "vencida", **d},
             )
             alertas.append({"tipo": "reserva_vencida", "reserva": reserva_obj})
 
             # Notificar al lector que perdió la reserva
-            self._repo.notificaciones.add({
+            await self._repo.notificaciones.add({
                 "lectorId": d["lectorId"],
                 "tipo": "reserva_expirada",
                 "titulo": "⌛ Reserva Expirada",
@@ -94,8 +95,9 @@ class AgentePlanificador:
             })
 
         # ── Paso 2: Vencimientos de préstamos ─────────────────────────
+        prestamos_todos = await self._repo.prestamos.get_all()
         prestamos_activos = [
-            p for p in self._repo.prestamos.get_all()
+            p for p in prestamos_todos
             if p.get("estado") in ("activo", "vencido")
         ]
         dias_recordatorio: int = int(config.get("recordatorioAntesDias") or 3)
@@ -108,10 +110,12 @@ class AgentePlanificador:
             diff_segundos = (venc - hoy).total_seconds()
             dias_diff = math.ceil(diff_segundos / 86400)
 
-            libro = self._repo.libros.get(p["libroId"])
-            lector = self._repo.lectores.get(p["lectorId"])
+            libro = await self._repo.libros.get(p["libroId"])
+            lector = await self._repo.lectores.get(p["lectorId"])
             if not libro or not lector:
                 continue
+
+            notifs_lector = await self._repo.notificaciones.get_by_lector(p["lectorId"])
 
             if dias_diff < 0:
                 # Préstamo ya vencido
@@ -125,14 +129,14 @@ class AgentePlanificador:
                 # Deduplicación de notificación
                 ya_notif = next(
                     (
-                        n for n in self._repo.notificaciones.get_by_lector(p["lectorId"])
+                        n for n in notifs_lector
                         if n.get("tipo") == "prestamo_vencido"
                         and libro["titulo"] in n.get("descripcion", "")
                     ),
                     None,
                 )
                 if not ya_notif:
-                    self._repo.notificaciones.add({
+                    await self._repo.notificaciones.add({
                         "lectorId": p["lectorId"],
                         "tipo": "prestamo_vencido",
                         "titulo": "⚠️ Préstamo vencido",
@@ -155,14 +159,14 @@ class AgentePlanificador:
                 })
                 ya_notif = next(
                     (
-                        n for n in self._repo.notificaciones.get_by_lector(p["lectorId"])
+                        n for n in notifs_lector
                         if n.get("tipo") == "vencimiento_proximo"
                         and libro["titulo"] in n.get("descripcion", "")
                     ),
                     None,
                 )
                 if not ya_notif:
-                    self._repo.notificaciones.add({
+                    await self._repo.notificaciones.add({
                         "lectorId": p["lectorId"],
                         "tipo": "vencimiento_proximo",
                         "titulo": "⏰ Préstamo próximo a vencer",
@@ -179,7 +183,7 @@ class AgentePlanificador:
     # Resumen
     # ------------------------------------------------------------------
 
-    def resumen_alertas(self) -> dict[str, Any]:
+    async def resumen_alertas(self) -> dict[str, Any]:
         """
         Ejecuta el ciclo y devuelve un resumen numérico de las alertas.
 
@@ -191,7 +195,7 @@ class AgentePlanificador:
               'detalle':       list[dict],
             }
         """
-        alertas = self.correr()
+        alertas = await self.correr()
         return {
             "vencidos":      sum(1 for a in alertas if a["tipo"] == "vencido"),
             "proximos":      sum(1 for a in alertas if a["tipo"] == "proximo"),

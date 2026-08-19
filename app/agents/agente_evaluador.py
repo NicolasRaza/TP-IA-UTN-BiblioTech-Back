@@ -48,7 +48,7 @@ class AgenteEvaluador:
     # Elegibilidad
     # ------------------------------------------------------------------
 
-    def evaluar_elegibilidad_lector(self, lector_id: str) -> dict[str, Any]:
+    async def evaluar_elegibilidad_lector(self, lector_id: str) -> dict[str, Any]:
         """
         Evalúa si un lector está habilitado para solicitar o reservar un libro.
 
@@ -65,7 +65,7 @@ class AgenteEvaluador:
         Returns:
             {'aprobado': bool, 'motivo': str | None}
         """
-        lector = self._repo.lectores.get(lector_id)
+        lector = await self._repo.lectores.get(lector_id)
         if not lector:
             return {"aprobado": False, "motivo": "Lector no registrado"}
         if not lector.get("activo"):
@@ -78,7 +78,7 @@ class AgenteEvaluador:
             }
 
         ahora = datetime.now(timezone.utc)
-        prestamos_lector = self._repo.prestamos.get_by_lector(lector_id)
+        prestamos_lector = await self._repo.prestamos.get_by_lector(lector_id)
 
         prestamos_vencidos = [
             p for p in prestamos_lector
@@ -108,7 +108,7 @@ class AgenteEvaluador:
     # Reservas expiradas
     # ------------------------------------------------------------------
 
-    def evaluar_reservas_expiradas(self) -> list[dict[str, Any]]:
+    async def evaluar_reservas_expiradas(self) -> list[dict[str, Any]]:
         """
         Evalúa reservas en estado 'lista' que superaron las 48hs de plazo.
 
@@ -116,8 +116,9 @@ class AgenteEvaluador:
             Lista de decisiones de liberación:
             [{accion, reservaId, libroId, lectorId, motivo}]
         """
+        reservas_all = await self._repo.reservas.get_all()
         reservas_listas = [
-            r for r in self._repo.reservas.get_all()
+            r for r in reservas_all
             if r.get("estado") == "lista"
         ]
         decisiones: list[dict[str, Any]] = []
@@ -144,7 +145,7 @@ class AgenteEvaluador:
     # Indicadores
     # ------------------------------------------------------------------
 
-    def calcular_indicadores(self) -> dict[str, Any]:
+    async def calcular_indicadores(self) -> dict[str, Any]:
         """
         Genera indicadores consolidados de uso e inventario.
 
@@ -155,34 +156,34 @@ class AgenteEvaluador:
               'topGeneros':  [(genero: str, count: int)]  # top 6
             }
         """
-        prestamos = self._repo.prestamos.get_all()
+        prestamos = await self._repo.prestamos.get_all()
 
         # Top libros
         por_libro: dict[str, int] = {}
         for p in prestamos:
             por_libro[p["libroId"]] = por_libro.get(p["libroId"], 0) + 1
         top_libros = sorted(por_libro.items(), key=lambda x: -x[1])[:5]
-        top_libros_objs = [
-            {"libro": self._repo.libros.get(lid), "prestamos": n}
-            for lid, n in top_libros
-            if self._repo.libros.get(lid)
-        ]
+        top_libros_objs = []
+        for lid, n in top_libros:
+            lib = await self._repo.libros.get(lid)
+            if lib:
+                top_libros_objs.append({"libro": lib, "prestamos": n})
 
         # Top lectores
         por_lector: dict[str, int] = {}
         for p in prestamos:
             por_lector[p["lectorId"]] = por_lector.get(p["lectorId"], 0) + 1
         top_lectores = sorted(por_lector.items(), key=lambda x: -x[1])[:5]
-        top_lectores_objs = [
-            {"lector": self._repo.lectores.get(lid), "prestamos": n}
-            for lid, n in top_lectores
-            if self._repo.lectores.get(lid)
-        ]
+        top_lectores_objs = []
+        for lid, n in top_lectores:
+            lec = await self._repo.lectores.get(lid)
+            if lec:
+                top_lectores_objs.append({"lector": lec, "prestamos": n})
 
         # Top géneros
         por_genero: dict[str, int] = {}
         for p in prestamos:
-            libro = self._repo.libros.get(p["libroId"])
+            libro = await self._repo.libros.get(p["libroId"])
             if libro and libro.get("genero"):
                 g = libro["genero"]
                 por_genero[g] = por_genero.get(g, 0) + 1
@@ -212,7 +213,7 @@ class AgenteEvaluador:
         Returns:
             Texto con el resumen (Ollama o fallback puro).
         """
-        ind = indicadores or self.calcular_indicadores()
+        ind = indicadores if indicadores is not None else await self.calcular_indicadores()
 
         str_libros = (
             ", ".join(
