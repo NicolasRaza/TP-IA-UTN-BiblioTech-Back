@@ -58,7 +58,7 @@ async def crear_lector(
         telefono=data.telefono,
         domicilio=data.domicilio,
         categoria=data.categoria,
-        estado=EstadoUsuario.SUSPENDIDO,  # pendiente de verificación por el bibliotecario
+        estado=EstadoUsuario.PENDIENTE,  # era SUSPENDIDO
         tutor_nombre=data.tutor_nombre,
         tutor_telefono=data.tutor_telefono,
         consentimiento_datos=data.consentimiento_datos,
@@ -74,7 +74,7 @@ async def listar_lectores(
     nombre: str | None = Query(None, description="Filtrar por nombre o apellido"),
     documento: str | None = Query(None),
     estado: EstadoUsuario | None = Query(
-        None, description="Filtrar por estado. Usar 'suspendido' para ver los autorregistros pendientes de verificación."
+        None, description="Filtrar por estado. Usar 'pendiente' para ver autorregistros sin verificar, 'suspendido' para lectores con mora o multas."
     ),
     _: Usuario = Depends(require_bibliotecario),
     db: AsyncSession = Depends(get_db),
