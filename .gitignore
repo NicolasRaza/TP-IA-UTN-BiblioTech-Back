@@ -6,3 +6,5 @@ firebase_credentials.json
 .DS_Store
 *.zip
 *.rar
+
+.venv/
