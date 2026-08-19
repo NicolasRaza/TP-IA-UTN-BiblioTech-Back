@@ -20,10 +20,10 @@ class CategoriaLector(str, enum.Enum):
 
 
 class EstadoUsuario(str, enum.Enum):
+    PENDIENTE = "pendiente"      # ← nuevo: autorregistro sin verificar
     ACTIVO = "activo"
-    SUSPENDIDO = "suspendido"
+    SUSPENDIDO = "suspendido"    # solo por mora o multas
     BAJA = "baja"
-
 
 class Usuario(Base):
     __tablename__ = "usuarios"
@@ -54,7 +54,7 @@ class Lector(Base):
     # Todo lector nuevo entra SUSPENDIDO: el autorregistro (POST /lectores/) es
     # público y sin token, así que la verificación queda en manos del
     # bibliotecario, que lo pasa a ACTIVO desde el PATCH existente.
-    estado: Mapped[EstadoUsuario] = mapped_column(Enum(EstadoUsuario), default=EstadoUsuario.SUSPENDIDO)
+    estado: Mapped[EstadoUsuario] = mapped_column(Enum(EstadoUsuario), default=EstadoUsuario.PENDIENTE)
     tutor_nombre: Mapped[str | None] = mapped_column(String(200), nullable=True)
     tutor_telefono: Mapped[str | None] = mapped_column(String(30), nullable=True)
     consentimiento_datos: Mapped[bool] = mapped_column(Boolean, default=False)

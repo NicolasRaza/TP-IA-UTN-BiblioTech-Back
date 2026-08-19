@@ -34,10 +34,15 @@ def dias_prestamo_por_categoria(categoria: CategoriaLector) -> int:
 
 async def verificar_lector_habilitado(lector: Lector, db: AsyncSession) -> None:
     """Valida estado, mora y cupo antes de permitir un nuevo préstamo o reserva."""
+    if lector.estado == EstadoUsuario.PENDIENTE:
+        raise HTTPException(
+            status_code=403,
+            detail="Lector pendiente de verificación por un bibliotecario",
+        )
     if lector.estado == EstadoUsuario.SUSPENDIDO:
         raise HTTPException(
             status_code=403,
-            detail="Lector suspendido: pendiente de verificación por un bibliotecario o con mora/multas impagas",
+            detail="Lector suspendido por mora o multas impagas",
         )
     if lector.estado == EstadoUsuario.BAJA:
         raise HTTPException(status_code=403, detail="Lector dado de baja")
