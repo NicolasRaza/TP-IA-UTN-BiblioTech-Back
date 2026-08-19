@@ -1,4 +1,4 @@
-﻿providers = ["python"]
+providers = ["python"]
 
 [phases.setup]
 aptPkgs = ["tesseract-ocr", "tesseract-ocr-spa", "tesseract-ocr-eng"]
