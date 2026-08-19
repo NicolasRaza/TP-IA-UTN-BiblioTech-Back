@@ -52,4 +52,5 @@ async def mi_perfil(usuario: Usuario = Depends(get_usuario_actual)):
         "email": usuario.email,
         "rol": usuario.rol,
         "lector_id": usuario.lector.id if usuario.lector else None,
+        "estado": usuario.lector.estado if usuario.lector else None
     }
