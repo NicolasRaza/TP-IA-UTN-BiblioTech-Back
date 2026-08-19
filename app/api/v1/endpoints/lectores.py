@@ -12,14 +12,22 @@ router = APIRouter(prefix="/lectores", tags=["Lectores"])
 
 
 @router.post("/", response_model=LectorResponse, status_code=201,
-             summary="Alta de lector (bibliotecario)")
+             summary="Autorregistro de lector (público, pendiente de verificación)")
 async def crear_lector(
     data: LectorCreate,
-    _: Usuario = Depends(require_bibliotecario),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Crea un lector y un usuario asociado con rol LECTOR.
+    Endpoint público (no requiere token): cualquier persona puede cargar sus
+    datos desde la pantalla de registro. Crea un lector y un usuario asociado
+    con rol LECTOR, siempre en estado SUSPENDIDO.
+
+    Un bibliotecario debe verificarlo y pasarlo a ACTIVO (PATCH /lectores/{id}
+    con {"estado": "activo"}) antes de que pueda sacar préstamos o reservar.
+    Mientras tanto puede iniciar sesión y navegar el catálogo, pero
+    `verificar_lector_habilitado` le va a bloquear cualquier operación de
+    circulación.
+
     Si el lector es menor de edad, los campos tutor_nombre y tutor_telefono son obligatorios.
     """
     # Verificar unicidad de documento
@@ -50,6 +58,7 @@ async def crear_lector(
         telefono=data.telefono,
         domicilio=data.domicilio,
         categoria=data.categoria,
+        estado=EstadoUsuario.SUSPENDIDO,  # pendiente de verificación por el bibliotecario
         tutor_nombre=data.tutor_nombre,
         tutor_telefono=data.tutor_telefono,
         consentimiento_datos=data.consentimiento_datos,
@@ -64,7 +73,9 @@ async def crear_lector(
 async def listar_lectores(
     nombre: str | None = Query(None, description="Filtrar por nombre o apellido"),
     documento: str | None = Query(None),
-    estado: EstadoUsuario | None = Query(None),
+    estado: EstadoUsuario | None = Query(
+        None, description="Filtrar por estado. Usar 'suspendido' para ver los autorregistros pendientes de verificación."
+    ),
     _: Usuario = Depends(require_bibliotecario),
     db: AsyncSession = Depends(get_db),
 ):

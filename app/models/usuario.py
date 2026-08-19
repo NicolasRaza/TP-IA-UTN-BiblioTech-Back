@@ -51,7 +51,10 @@ class Lector(Base):
     telefono: Mapped[str | None] = mapped_column(String(30), nullable=True)
     domicilio: Mapped[str | None] = mapped_column(Text, nullable=True)
     categoria: Mapped[CategoriaLector] = mapped_column(Enum(CategoriaLector), default=CategoriaLector.ADULTO)
-    estado: Mapped[EstadoUsuario] = mapped_column(Enum(EstadoUsuario), default=EstadoUsuario.ACTIVO)
+    # Todo lector nuevo entra SUSPENDIDO: el autorregistro (POST /lectores/) es
+    # público y sin token, así que la verificación queda en manos del
+    # bibliotecario, que lo pasa a ACTIVO desde el PATCH existente.
+    estado: Mapped[EstadoUsuario] = mapped_column(Enum(EstadoUsuario), default=EstadoUsuario.SUSPENDIDO)
     tutor_nombre: Mapped[str | None] = mapped_column(String(200), nullable=True)
     tutor_telefono: Mapped[str | None] = mapped_column(String(30), nullable=True)
     consentimiento_datos: Mapped[bool] = mapped_column(Boolean, default=False)
