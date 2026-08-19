@@ -74,6 +74,52 @@ class LectorFichaResponse(LectorResponse):
     multas_pendientes: int = 0
 
 
+# ── Bibliotecario (ABM de usuarios internos) ───────────────────────────────────
+
+class BibliotecarioCreate(BaseModel):
+    email: EmailStr
+    password: str
+    rol: RolUsuario = RolUsuario.BIBLIOTECARIO
+
+    @field_validator("rol")
+    @classmethod
+    def rol_valido(cls, v: RolUsuario) -> RolUsuario:
+        if v not in (RolUsuario.BIBLIOTECARIO, RolUsuario.ADMINISTRADOR):
+            raise ValueError("El rol debe ser bibliotecario o administrador")
+        return v
+
+    @field_validator("password")
+    @classmethod
+    def password_minima(cls, v: str) -> str:
+        if len(v) < 6:
+            raise ValueError("La contraseña debe tener al menos 6 caracteres")
+        return v
+
+
+class BibliotecarioUpdate(BaseModel):
+    email: Optional[EmailStr] = None
+    password: Optional[str] = None
+    rol: Optional[RolUsuario] = None
+    activo: Optional[bool] = None
+
+    @field_validator("rol")
+    @classmethod
+    def rol_valido(cls, v: Optional[RolUsuario]) -> Optional[RolUsuario]:
+        if v is not None and v not in (RolUsuario.BIBLIOTECARIO, RolUsuario.ADMINISTRADOR):
+            raise ValueError("El rol debe ser bibliotecario o administrador")
+        return v
+
+
+class BibliotecarioResponse(BaseModel):
+    id: int
+    email: EmailStr
+    rol: RolUsuario
+    activo: bool
+    creado_en: datetime
+
+    model_config = {"from_attributes": True}
+
+
 # ── Firebase token (para push notifications) ──────────────────────────────────
 
 class FirebaseTokenUpdate(BaseModel):
