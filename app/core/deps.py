@@ -6,6 +6,7 @@ from app.db.session import AsyncSessionLocal
 from app.core.security import decodificar_token
 from app.models.usuario import Usuario, RolUsuario
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
@@ -32,7 +33,16 @@ async def get_usuario_actual(
     if usuario_id is None:
         raise credenciales_exc
 
-    result = await db.execute(select(Usuario).where(Usuario.id == int(usuario_id)))
+    # `selectinload` no es opcional: sobre un engine async, tocar una relación
+    # de carga diferida fuera del contexto de I/O de SQLAlchemy lanza
+    # `MissingGreenlet`. Como el usuario que devuelve esta dependencia lo
+    # consumen endpoints que leen `usuario.lector` —`GET /auth/me`, entre
+    # otros—, la relación se trae acá, en la misma ida a la base.
+    result = await db.execute(
+        select(Usuario)
+        .options(selectinload(Usuario.lector))
+        .where(Usuario.id == int(usuario_id))
+    )
     usuario = result.scalar_one_or_none()
     if usuario is None or not usuario.activo:
         raise credenciales_exc
