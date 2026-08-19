@@ -19,6 +19,7 @@ class DevolucionRequest(BaseModel):
 class PrestamoResponse(BaseModel):
     id: int
     ejemplar_id: int
+    titulo_id: Optional[int] = None    # ← agregar esta línea
     lector_id: int
     fecha_inicio: date
     fecha_devolucion_pactada: date

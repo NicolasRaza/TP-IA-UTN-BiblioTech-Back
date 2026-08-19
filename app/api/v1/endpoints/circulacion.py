@@ -107,6 +107,7 @@ async def crear_prestamo(
     await db.refresh(prestamo)
 
     r = PrestamoResponse.model_validate(prestamo)
+    r.titulo_id = ejemplar.titulo_id if ejemplar else None
     r.dias_restantes = (prestamo.fecha_devolucion_pactada - hoy).days
     return r
 
@@ -463,3 +464,59 @@ async def resumen_ia(
     indicadores = evaluador.calcular_indicadores()
     resumen = await evaluador.generar_resumen_con_ia(indicadores)
     return {"indicadores": indicadores, "resumen": resumen}
+
+@router.get(
+    "/prestamos",
+    response_model=list[PrestamoResponse],
+    summary="Listar todos los préstamos",
+    description="""
+Retorna todos los préstamos del sistema. Filtrá por estado con el parámetro `estado`.
+
+Incluye `titulo_id` en cada préstamo para resolver el libro sin requests adicionales.
+
+**Estados posibles:** `activo`, `devuelto`, `vencido`
+
+Solo accesible para bibliotecarios y administradores.
+    """,
+    tags=["Circulación"],
+)
+async def listar_prestamos(
+    estado: EstadoPrestamo | None = Query(None),
+    _: Usuario = Depends(require_bibliotecario),
+    db: AsyncSession = Depends(get_db),
+):
+    query = select(Prestamo)
+    if estado:
+        query = query.where(Prestamo.estado == estado)
+    result = await db.execute(query.order_by(Prestamo.fecha_inicio.desc()))
+    prestamos = result.scalars().all()
+
+    hoy = date.today()
+    respuestas = []
+    for p in prestamos:
+        ej = await db.get(Ejemplar, p.ejemplar_id)
+        r = PrestamoResponse.model_validate(p)
+        r.titulo_id = ej.titulo_id if ej else None
+        if p.estado == EstadoPrestamo.ACTIVO:
+            r.dias_restantes = (p.fecha_devolucion_pactada - hoy).days
+        respuestas.append(r)
+    return respuestas
+
+
+@router.get(
+    "/reservas",
+    response_model=list[ReservaResponse],
+    summary="Listar todas las reservas",
+    description="Retorna todas las reservas del sistema. Filtrá por estado con el parámetro `estado`.",
+    tags=["Circulación"],
+)
+async def listar_reservas(
+    estado: EstadoReserva | None = Query(None),
+    _: Usuario = Depends(require_bibliotecario),
+    db: AsyncSession = Depends(get_db),
+):
+    query = select(Reserva)
+    if estado:
+        query = query.where(Reserva.estado == estado)
+    result = await db.execute(query.order_by(Reserva.fecha_solicitud.desc()))
+    return result.scalars().all()
