@@ -180,7 +180,10 @@ async def registrar_devolucion(
 
     await db.commit()
     await db.refresh(prestamo)
-    return PrestamoResponse.model_validate(prestamo)
+
+    r = PrestamoResponse.model_validate(prestamo)
+    r.titulo_id = ejemplar.titulo_id if ejemplar else None
+    return r
 
 
 @router.get("/prestamos/lector/{lector_id}", response_model=list[PrestamoResponse],
@@ -201,7 +204,9 @@ async def historial_prestamos(
     hoy = date.today()
     respuestas = []
     for p in prestamos:
+        ej = await db.get(Ejemplar, p.ejemplar_id)
         r = PrestamoResponse.model_validate(p)
+        r.titulo_id = ej.titulo_id if ej else None
         if p.estado == EstadoPrestamo.ACTIVO:
             r.dias_restantes = (p.fecha_devolucion_pactada - hoy).days
         respuestas.append(r)
