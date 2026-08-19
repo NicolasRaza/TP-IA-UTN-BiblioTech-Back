@@ -459,7 +459,7 @@ async def recomendaciones(
 
     repo = construir_repositorio(db)
     agente = AgenteAprendizaje(repo)
-    libros = agente.recomendar_para_lector(str(lector.id))
+    libros = await agente.recomendar_para_lector(str(lector.id))
     return libros
 
 
@@ -474,7 +474,7 @@ async def resumen_ia(
 
     repo = construir_repositorio(db)
     evaluador = AgenteEvaluador(repo)
-    indicadores = evaluador.calcular_indicadores()
+    indicadores = await evaluador.calcular_indicadores()
     resumen = await evaluador.generar_resumen_con_ia(indicadores)
     return {"indicadores": indicadores, "resumen": resumen}
 

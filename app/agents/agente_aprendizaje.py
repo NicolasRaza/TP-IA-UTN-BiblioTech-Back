@@ -67,7 +67,7 @@ class AgenteAprendizaje:
     # Recomendaciones
     # ------------------------------------------------------------------
 
-    def recomendar_para_lector(self, lector_id: str) -> list[dict[str, Any]]:
+    async def recomendar_para_lector(self, lector_id: str) -> list[dict[str, Any]]:
         """
         Genera recomendaciones personalizadas aplicando la Regla de Ponderación.
 
@@ -84,25 +84,24 @@ class AgenteAprendizaje:
         Returns:
             Lista de hasta 8 objetos Libro ordenados por score descendente.
         """
-        lector = self._repo.lectores.get(lector_id)
+        lector = await self._repo.lectores.get(lector_id)
         if not lector:
             return []
 
-        prestamos = self._repo.prestamos.get_by_lector(lector_id)
-        reservas = self._repo.reservas.get_by_lector(lector_id)
+        prestamos = await self._repo.prestamos.get_by_lector(lector_id)
+        reservas = await self._repo.reservas.get_by_lector(lector_id)
 
         ids_prestados = {p["libroId"] for p in prestamos}
         ids_reservados = {r["libroId"] for r in reservas}
         excluir = ids_prestados | ids_reservados
 
-        libros_leidos = [
-            self._repo.libros.get(lid) for lid in ids_prestados
-            if self._repo.libros.get(lid)
-        ]
+        libros_por_id = [await self._repo.libros.get(lid) for lid in ids_prestados]
+        libros_leidos = [l for l in libros_por_id if l]
         cantidad_prestamos_registrados = len(libros_leidos)
 
+        todos_libros = await self._repo.libros.get_all()
         todos = [
-            l for l in self._repo.libros.get_all()
+            l for l in todos_libros
             if l.get("validado") and l["id"] not in excluir
         ]
         generos_interes: list[str] = lector.get("generosInteres") or []
@@ -123,7 +122,7 @@ class AgenteAprendizaje:
             if l.get("genero")
         }
 
-        todos_prestamos = self._repo.prestamos.get_all()
+        todos_prestamos = await self._repo.prestamos.get_all()
 
         scored: list[dict[str, Any]] = []
         for libro in todos:
@@ -208,7 +207,7 @@ class AgenteAprendizaje:
     # Análisis de efectividad de recomendaciones
     # ------------------------------------------------------------------
 
-    def analizar_recomendaciones(self) -> dict[str, Any]:
+    async def analizar_recomendaciones(self) -> dict[str, Any]:
         """
         Analiza clics sobre recomendaciones para detectar cuáles derivaron en reserva.
 
@@ -228,11 +227,11 @@ class AgenteAprendizaje:
                 por_libro[lid] = por_libro.get(lid, 0) + 1
 
         mas_efectivos = sorted(por_libro.items(), key=lambda x: -x[1])[:TOP_EFECTIVOS]
-        mas_efectivos_objs = [
-            {"libro": self._repo.libros.get(lid), "conversiones": n}
-            for lid, n in mas_efectivos
-            if self._repo.libros.get(lid)
-        ]
+        mas_efectivos_objs = []
+        for lid, n in mas_efectivos:
+            lib = await self._repo.libros.get(lid)
+            if lib:
+                mas_efectivos_objs.append({"libro": lib, "conversiones": n})
 
         return {"masEfectivos": mas_efectivos_objs, "totalClics": len(clics)}
 
@@ -252,7 +251,7 @@ class AgenteAprendizaje:
             }
         """
         ocr = self.analizar_correcciones_ocr()
-        reco = self.analizar_recomendaciones()
+        reco = await self.analizar_recomendaciones()
 
         fallback_resumen = (
             f"Red de Agentes operando con {ocr.get('totalCorrecciones', 0)} correcciones registradas. "

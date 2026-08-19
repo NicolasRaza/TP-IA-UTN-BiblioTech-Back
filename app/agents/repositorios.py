@@ -42,47 +42,47 @@ ElegibilidadResult = dict[str, Any]  # {ok: bool, razon?: str}
 
 @runtime_checkable
 class RepositorioLibros(Protocol):
-    def get_all(self) -> list[Libro]:
+    async def get_all(self) -> list[Libro]:
         """Devuelve todos los libros (equivalente a DB.libros.getAll())."""
         ...
 
-    def get(self, libro_id: str) -> Optional[Libro]:
+    async def get(self, libro_id: str) -> Optional[Libro]:
         """Devuelve un libro por ID (equivalente a DB.libros.get(id))."""
         ...
 
-    def add(self, libro: Libro) -> Libro:
+    async def add(self, libro: Libro) -> Libro:
         """Persiste un libro nuevo (equivalente a DB.libros.add(libro))."""
         ...
 
-    def update(self, libro_id: str, changes: dict[str, Any]) -> Optional[Libro]:
+    async def update(self, libro_id: str, changes: dict[str, Any]) -> Optional[Libro]:
         """Actualiza campos de un libro (equivalente a DB.libros.update(id, changes))."""
         ...
 
-    def delete(self, libro_id: str) -> None:
+    async def delete(self, libro_id: str) -> None:
         """Elimina un libro (equivalente a DB.libros.delete(id))."""
         ...
 
-    def add_ejemplar(self, libro_id: str, ejemplar: Ejemplar) -> Optional[Ejemplar]:
+    async def add_ejemplar(self, libro_id: str, ejemplar: Ejemplar) -> Optional[Ejemplar]:
         """Agrega un ejemplar a un libro (equivalente a DB.libros.addEjemplar())."""
         ...
 
-    def get_disponible(self, libro_id: str) -> Optional[Ejemplar]:
+    async def get_disponible(self, libro_id: str) -> Optional[Ejemplar]:
         """Devuelve el primer ejemplar disponible (equivalente a DB.libros.getDisponible())."""
         ...
 
-    def update_ejemplar(self, libro_id: str, ejemplar_id: str, changes: dict[str, Any]) -> None:
+    async def update_ejemplar(self, libro_id: str, ejemplar_id: str, changes: dict[str, Any]) -> None:
         """Actualiza campos de un ejemplar (equivalente a DB.libros.updateEjemplar())."""
         ...
 
-    def get_by_qr(self, qr: str) -> Optional[dict[str, Any]]:
+    async def get_by_qr(self, qr: str) -> Optional[dict[str, Any]]:
         """Devuelve {libro, ejemplar} por código QR (equivalente a DB.libros.getByQR())."""
         ...
 
-    def search(self, q: str = '', genero: str = '') -> list[Libro]:
+    async def search(self, q: str = '', genero: str = '') -> list[Libro]:
         """Busca libros validados por texto y/o género (equivalente a DB.libros.search())."""
         ...
 
-    def get_generos(self) -> list[str]:
+    async def get_generos(self) -> list[str]:
         """Devuelve lista de géneros únicos (equivalente a DB.libros.getGeneros())."""
         ...
 
@@ -94,31 +94,31 @@ class RepositorioLibros(Protocol):
 
 @runtime_checkable
 class RepositorioLectores(Protocol):
-    def get_all(self) -> list[Lector]:
+    async def get_all(self) -> list[Lector]:
         """Devuelve todos los lectores (sin personal) (equivalente a DB.lectores.getAll())."""
         ...
 
-    def get(self, lector_id: str) -> Optional[Lector]:
+    async def get(self, lector_id: str) -> Optional[Lector]:
         """Devuelve un lector por ID (equivalente a DB.lectores.get(id))."""
         ...
 
-    def get_by_email(self, email: str) -> Optional[Lector]:
+    async def get_by_email(self, email: str) -> Optional[Lector]:
         """Devuelve un lector por email (equivalente a DB.lectores.getByEmail())."""
         ...
 
-    def get_by_qr(self, qr: str) -> Optional[Lector]:
+    async def get_by_qr(self, qr: str) -> Optional[Lector]:
         """Devuelve un lector por código QR (equivalente a DB.lectores.getByQR())."""
         ...
 
-    def add(self, lector: Lector) -> Lector:
+    async def add(self, lector: Lector) -> Lector:
         """Persiste un lector nuevo (equivalente a DB.lectores.add())."""
         ...
 
-    def update(self, lector_id: str, changes: dict[str, Any]) -> Optional[Lector]:
+    async def update(self, lector_id: str, changes: dict[str, Any]) -> Optional[Lector]:
         """Actualiza campos de un lector (equivalente a DB.lectores.update())."""
         ...
 
-    def can_borrow(self, lector_id: str) -> ElegibilidadResult:
+    async def can_borrow(self, lector_id: str) -> ElegibilidadResult:
         """
         Evalúa si un lector puede tomar préstamos.
         Equivalente a DB.lectores.canBorrow().
@@ -127,7 +127,7 @@ class RepositorioLectores(Protocol):
         """
         ...
 
-    def can_reserve(self, lector_id: str) -> ElegibilidadResult:
+    async def can_reserve(self, lector_id: str) -> ElegibilidadResult:
         """
         Evalúa si un lector puede hacer reservas.
         Equivalente a DB.lectores.canReserve().
@@ -143,33 +143,33 @@ class RepositorioLectores(Protocol):
 
 @runtime_checkable
 class RepositorioPrestamos(Protocol):
-    def get_all(self) -> list[Prestamo]:
+    async def get_all(self) -> list[Prestamo]:
         """Devuelve todos los préstamos (equivalente a DB.prestamos.getAll())."""
         ...
 
-    def get(self, prestamo_id: str) -> Optional[Prestamo]:
+    async def get(self, prestamo_id: str) -> Optional[Prestamo]:
         """Devuelve un préstamo por ID (equivalente a DB.prestamos.get())."""
         ...
 
-    def get_by_lector(self, lector_id: str) -> list[Prestamo]:
+    async def get_by_lector(self, lector_id: str) -> list[Prestamo]:
         """Devuelve préstamos de un lector (equivalente a DB.prestamos.getByLector())."""
         ...
 
-    def crear(self, lector_id: str, ejemplar_id: str, libro_id: str) -> Prestamo:
+    async def crear(self, lector_id: str, ejemplar_id: str, libro_id: str) -> Prestamo:
         """
         Crea un préstamo, actualiza el ejemplar y cierra la reserva si existe.
         Equivalente a DB.prestamos.crear().
         """
         ...
 
-    def devolver(self, prestamo_id: str) -> Optional[Prestamo]:
+    async def devolver(self, prestamo_id: str) -> Optional[Prestamo]:
         """
         Registra la devolución, calcula multa si es tardía.
         Equivalente a DB.prestamos.devolver().
         """
         ...
 
-    def get_stats(self) -> dict[str, Any]:
+    async def get_stats(self) -> dict[str, Any]:
         """
         Devuelve estadísticas agregadas.
         Equivalente a DB.prestamos.getStats().
@@ -177,7 +177,7 @@ class RepositorioPrestamos(Protocol):
         """
         ...
 
-    def top_libros(self, n: int = 5) -> list[dict[str, Any]]:
+    async def top_libros(self, n: int = 5) -> list[dict[str, Any]]:
         """
         Devuelve los n libros más prestados.
         Equivalente a DB.prestamos.topLibros().
@@ -193,15 +193,15 @@ class RepositorioPrestamos(Protocol):
 
 @runtime_checkable
 class RepositorioReservas(Protocol):
-    def get_all(self) -> list[Reserva]:
+    async def get_all(self) -> list[Reserva]:
         """Devuelve todas las reservas (equivalente a DB.reservas.getAll())."""
         ...
 
-    def get_by_lector(self, lector_id: str) -> list[Reserva]:
+    async def get_by_lector(self, lector_id: str) -> list[Reserva]:
         """Devuelve reservas de un lector (equivalente a DB.reservas.getByLector())."""
         ...
 
-    def crear(self, lector_id: str, libro_id: str) -> Reserva | dict[str, str]:
+    async def crear(self, lector_id: str, libro_id: str) -> Reserva | dict[str, str]:
         """
         Crea una reserva, validando duplicados y límites.
         Equivalente a DB.reservas.crear().
@@ -209,18 +209,18 @@ class RepositorioReservas(Protocol):
         """
         ...
 
-    def cancelar(self, reserva_id: str) -> None:
+    async def cancelar(self, reserva_id: str) -> None:
         """Cancela una reserva (equivalente a DB.reservas.cancelar())."""
         ...
 
-    def marcar_lista(self, reserva_id: str) -> None:
+    async def marcar_lista(self, reserva_id: str) -> None:
         """
         Marca una reserva como lista para retiro y calcula el vencimiento (48hs).
         Equivalente a DB.reservas.marcarLista().
         """
         ...
 
-    def get_cola_por_libro(self, libro_id: str) -> list[Reserva]:
+    async def get_cola_por_libro(self, libro_id: str) -> list[Reserva]:
         """
         Devuelve la cola de reservas pendientes/listas para un libro.
         Equivalente a DB.reservas.getColaPorLibro().
@@ -235,26 +235,26 @@ class RepositorioReservas(Protocol):
 
 @runtime_checkable
 class RepositorioNotificaciones(Protocol):
-    def get_by_lector(self, lector_id: str) -> list[Notificacion]:
+    async def get_by_lector(self, lector_id: str) -> list[Notificacion]:
         """
         Devuelve notificaciones de un lector ordenadas por fecha desc.
         Equivalente a DB.notificaciones.getByLector().
         """
         ...
 
-    def count_unread(self, lector_id: str) -> int:
+    async def count_unread(self, lector_id: str) -> int:
         """Cuenta notificaciones no leídas (equivalente a DB.notificaciones.countUnread())."""
         ...
 
-    def add(self, notif: Notificacion) -> None:
+    async def add(self, notif: Notificacion) -> None:
         """Agrega una notificación (equivalente a DB.notificaciones.add())."""
         ...
 
-    def marcar_leida(self, notif_id: str) -> None:
+    async def marcar_leida(self, notif_id: str) -> None:
         """Marca una notificación como leída (equivalente a DB.notificaciones.marcarLeida())."""
         ...
 
-    def marcar_todas_leidas(self, lector_id: str) -> None:
+    async def marcar_todas_leidas(self, lector_id: str) -> None:
         """Marca todas las notificaciones de un lector como leídas."""
         ...
 
