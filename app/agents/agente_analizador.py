@@ -1180,7 +1180,7 @@ class AgenteAnalizador:
                                 "paginas": str(v.get("pageCount", "")) if v.get("pageCount") else "",
                                 "genero": _normalizar_genero(", ".join(v.get("categories", []))) if v.get("categories") else "",
                                 "sinopsis": v.get("description", ""),
-                                "portada": (v.get("imageLinks") or {}).get("thumbnail", ""),
+                                "portada": "",  # ← siempre vacío, OpenLibrary se encarga de la portada
                             }
             except Exception as err:
                 logger.debug("[AgenteAnalizador] Error consultando Google Books: %s", err)
@@ -1199,6 +1199,13 @@ class AgenteAnalizador:
                             autores = ", ".join(a.get("name", "") for a in info.get("authors", []))
                             pubs = info.get("publishers", [])
                             editorial = pubs[0].get("name", "") if pubs else ""
+                            cover = info.get("cover") or {}
+                            portada = (
+                                cover.get("large")
+                                or cover.get("medium")
+                                or cover.get("small")
+                                or f"https://covers.openlibrary.org/b/isbn/{isbn}-L.jpg"
+                            )
                             return {
                                 "isbn": isbn,
                                 "titulo": info.get("title", ""),
@@ -1206,7 +1213,19 @@ class AgenteAnalizador:
                                 "editorial": editorial,
                                 "anio": str(info.get("publish_date", ""))[:4] or "",
                                 "paginas": str(info.get("number_of_pages", "")) if info.get("number_of_pages") else "",
-                                "portada": (info.get("cover") or {}).get("medium", ""),
+                                "portada": portada,
+                            }
+                        else:
+                            # ISBN no encontrado en OpenLibrary pero intentamos portada directa
+                            portada_directa = f"https://covers.openlibrary.org/b/isbn/{isbn}-L.jpg"
+                            return {
+                                "isbn": isbn,
+                                "titulo": "",
+                                "autor": "",
+                                "editorial": "",
+                                "anio": "",
+                                "paginas": "",
+                                "portada": portada_directa,
                             }
             except Exception as err:
                 logger.debug("[AgenteAnalizador] Error consultando OpenLibrary: %s", err)
