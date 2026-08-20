@@ -478,6 +478,28 @@ async def resumen_ia(
     resumen = await evaluador.generar_resumen_con_ia(indicadores)
     return {"indicadores": indicadores, "resumen": resumen}
 
+
+@router.get("/dashboard/alertas-operativas", summary="Alertas operativas generadas por AgentePlanificador")
+async def alertas_operativas(
+    _: Usuario = Depends(require_bibliotecario),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Ejecuta el ciclo de orquestación operativa del AgentePlanificador:
+    - Evalúa y procesa reservas expiradas (> 48hs).
+    - Detecta préstamos vencidos y próximos a vencer.
+    - Genera notificaciones proactivas y devuelve el resumen consolidado de alertas.
+    """
+    from app.agents.agente_evaluador import AgenteEvaluador
+    from app.agents.agente_planificador import AgentePlanificador
+    from app.agents.repositorios_impl import construir_repositorio
+
+    repo = construir_repositorio(db)
+    evaluador = AgenteEvaluador(repo)
+    planificador = AgentePlanificador(repo, evaluador)
+    return await planificador.resumen_alertas()
+
+
 @router.get(
     "/prestamos",
     response_model=list[PrestamoResponse],

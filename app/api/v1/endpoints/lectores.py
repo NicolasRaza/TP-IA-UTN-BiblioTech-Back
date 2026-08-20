@@ -137,6 +137,27 @@ async def obtener_lector(
     return ficha
 
 
+@router.get("/{lector_id}/elegibilidad", summary="Evaluar elegibilidad de lector (AgenteEvaluador)")
+async def evaluar_elegibilidad(
+    lector_id: int,
+    _: Usuario = Depends(require_bibliotecario),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Evalúa mediante el AgenteEvaluador si el lector está habilitado para solicitar o reservar libros:
+    - Cuenta activa
+    - Sin multas pendientes
+    - Sin préstamos con fecha de vencimiento superada
+    - Cupo disponible según categoría
+    """
+    from app.agents.agente_evaluador import AgenteEvaluador
+    from app.agents.repositorios_impl import construir_repositorio
+
+    repo = construir_repositorio(db)
+    evaluador = AgenteEvaluador(repo)
+    return await evaluador.evaluar_elegibilidad_lector(str(lector_id))
+
+
 @router.patch("/{lector_id}", response_model=LectorResponse, summary="Modificar lector")
 async def modificar_lector(
     lector_id: int,
