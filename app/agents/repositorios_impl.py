@@ -14,6 +14,7 @@ from typing import Any, Optional
 
 from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.usuario import Lector, EstadoUsuario, CategoriaLector
 from app.models.libro import Titulo, Ejemplar, EstadoEjemplar, EstadoValidacion
@@ -189,12 +190,18 @@ class RepoLectores:
 
     async def get_all(self) -> list[dict]:
         result = await self._db.execute(
-            select(Lector).where(Lector.estado != EstadoUsuario.BAJA)
+            select(Lector)
+            .where(Lector.estado != EstadoUsuario.BAJA)
+            .options(selectinload(Lector.usuario))
         )
         return [_lector_to_dict(l) for l in result.scalars().all()]
 
     async def get(self, lector_id: str) -> Optional[dict]:
-        result = await self._db.execute(select(Lector).where(Lector.id == int(lector_id)))
+        result = await self._db.execute(
+            select(Lector)
+            .where(Lector.id == int(lector_id))
+            .options(selectinload(Lector.usuario))
+        )
         lector = result.scalar_one_or_none()
         if not lector:
             return None
@@ -208,7 +215,10 @@ class RepoLectores:
 
     async def get_by_email(self, email: str) -> Optional[dict]:
         result = await self._db.execute(
-            select(Lector).join(Usuario).where(Usuario.email == email)
+            select(Lector)
+            .join(Usuario)
+            .where(Usuario.email == email)
+            .options(selectinload(Lector.usuario))
         )
         lector = result.scalar_one_or_none()
         return _lector_to_dict(lector) if lector else None
@@ -258,17 +268,25 @@ class RepoPrestamos:
         self._db = db
 
     async def get_all(self) -> list[dict]:
-        result = await self._db.execute(select(Prestamo))
+        result = await self._db.execute(
+            select(Prestamo).options(selectinload(Prestamo.ejemplar))
+        )
         return [_prestamo_to_dict(p) for p in result.scalars().all()]
 
     async def get(self, prestamo_id: str) -> Optional[dict]:
-        result = await self._db.execute(select(Prestamo).where(Prestamo.id == int(prestamo_id)))
+        result = await self._db.execute(
+            select(Prestamo)
+            .where(Prestamo.id == int(prestamo_id))
+            .options(selectinload(Prestamo.ejemplar))
+        )
         p = result.scalar_one_or_none()
         return _prestamo_to_dict(p) if p else None
 
     async def get_by_lector(self, lector_id: str) -> list[dict]:
         result = await self._db.execute(
-            select(Prestamo).where(Prestamo.lector_id == int(lector_id))
+            select(Prestamo)
+            .where(Prestamo.lector_id == int(lector_id))
+            .options(selectinload(Prestamo.ejemplar))
         )
         return [_prestamo_to_dict(p) for p in result.scalars().all()]
 

@@ -163,7 +163,7 @@ class AgenteAprendizaje:
     # Análisis de correcciones OCR
     # ------------------------------------------------------------------
 
-    def analizar_correcciones_ocr(self) -> dict[str, Any]:
+    async def analizar_correcciones_ocr(self) -> dict[str, Any]:
         """
         Analiza el historial de correcciones hechas por el bibliotecario sobre OCR.
 
@@ -250,7 +250,7 @@ class AgenteAprendizaje:
               'resumen': str  (Ollama o fallback),
             }
         """
-        ocr = self.analizar_correcciones_ocr()
+        ocr = await self.analizar_correcciones_ocr()
         reco = await self.analizar_recomendaciones()
 
         fallback_resumen = (
