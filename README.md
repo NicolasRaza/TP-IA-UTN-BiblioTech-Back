@@ -1,60 +1,37 @@
-# BiblioTech — Backend (SGB API)
+# BiblioTech — Backend
 
-Trabajo Final · Inteligencia Artificial Aplicada a Organizaciones · UTN-FRBA
+## Entrega Final - Proyecto en vivo
 
-## Qué es
+🔗 **API en producción:** https://tp-ia-utn-bibliotech-back-production.up.railway.app/
+📄 **Documentación interactiva (Swagger):** https://tp-ia-utn-bibliotech-back-production.up.railway.app/docs
 
-API REST que sirve al Sistema de Gestión de Bibliotecas (SGB): catálogo, circulación (préstamos, reservas, multas), padrón de lectores y cinco agentes de IA que automatizan la carga operativa (captura por OCR, enriquecimiento bibliográfico, planificación de reservas, evaluación de indicadores y aprendizaje continuo). El backend sigue el ciclo de orquestación cíclica definido en el diseño conceptual del proyecto: Observación → Análisis → Decisión → Acción, con el Agente Evaluador decidiendo y el Agente Planificador ejecutando, separados por diseño.
+Para probar los endpoints protegidos, hay que loguearse primero — no hay credenciales de administrador precargadas en el propio Swagger, se obtienen haciendo login por `/api/v1/auth/login`.
+
+## Sobre el proyecto
+
+BiblioTech es un sistema de gestión de bibliotecas (SGB), y este repositorio es su **backend**: la API que sirve el catálogo, los préstamos, las reservas y el padrón de lectores, y que aloja a los cinco agentes de IA que automatizan la parte más repetitiva del trabajo bibliotecario — leer un libro nuevo con la cámara y completar su ficha solos, armar y avisar la cola de reservas, y resumir en una frase qué necesita atención hoy.
+
+El backend sigue el mismo ciclo que describe el diseño conceptual del proyecto: Observación → Análisis → Decisión → Acción, con el Agente Evaluador decidiendo qué corresponde hacer y el Agente Planificador ejecutándolo — separados por diseño, para que uno nunca pueda actuar sin que el otro lo haya decidido antes.
+
+## Funcionalidades principales
+
+- **Catálogo**: alta de títulos y ejemplares, cada uno con su código QR único
+- **Circulación**: préstamos, devoluciones, reservas con cola y multas por atraso
+- **Padrón de lectores**: alta, categorías (infantil, adolescente, adulto, docente, institucional) y baja lógica
+- **Agentes de IA**:
+  - **Captura + Analizador** → OCR de 3 fotos del libro, enriquecimiento por ISBN
+  - **Planificador** → gestiona la cola de reservas y dispara notificaciones push
+  - **Evaluador** → resume el estado de la biblioteca en lenguaje natural
+  - **Aprendizaje** → ajusta las recomendaciones según el historial de cada lector
+- **Autenticación** por rol (lector, bibliotecario, administrador) con JWT
 
 ## Enlaces del proyecto
 
 | Recurso | Link |
 |---|---|
-| **API en producción** | https://tp-ia-utn-bibliotech-back-production.up.railway.app/ |
-| **Documentación interactiva (Swagger)** | https://tp-ia-utn-bibliotech-back-production.up.railway.app/docs |
 | **Repositorio frontend** | https://github.com/NicolasRaza/TP-IA-UTN-BiblioTech-Front |
 | **Aplicación web (producción)** | https://nicolasraza.github.io/TP-IA-UTN-BiblioTech-Front/ |
-
-## Cómo probarlo
-
-**Health check**, sin autenticación:
-```bash
-curl https://tp-ia-utn-bibliotech-back-production.up.railway.app/
-# {"status":"ok","sistema":"SGB v1.0"}
-```
-
-**Login** de administrador, para obtener un JWT y probar el resto de los endpoints:
-```bash
-curl -X POST https://tp-ia-utn-bibliotech-back-production.up.railway.app/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email": "admin@biblioteca.com", "password": "admin123"}'
-```
-
-Para explorar todos los endpoints con ejemplos reales, importar la colección de Postman incluida en el repositorio de documentación, o abrir el Swagger de arriba.
-
-## Arquitectura
-
-```
-app/
-├── api/v1/endpoints/    # auth, lectores, catalogo, circulacion, usuarios, dashboard
-├── agents/              # los 5 agentes + adaptadores contra la base real
-├── core/                # config, seguridad (JWT/hashing), dependencias
-├── db/                  # engine async de SQLAlchemy
-├── models/               # 7 entidades: Usuario, Lector, Titulo, Ejemplar, Prestamo, Reserva, Multa
-└── schemas/              # validación Pydantic de entrada/salida
-```
-
-**Agentes:**
-
-| Agente | Responsabilidad |
-|---|---|
-| Captura | OCR de las 3 fotos del ejemplar (tapa, contratapa, ficha técnica) |
-| Analizador | Estructura los campos y enriquece la ficha por ISBN |
-| Planificador | Gestiona la cola de reservas y agenda las notificaciones push (Firebase) |
-| Evaluador | Interpreta indicadores operativos y decide la próxima acción, en lenguaje natural |
-| Aprendizaje | Ajusta las recomendaciones (70% historial del lector / 30% popularidad general) |
-
-El modelo de datos completo, con las relaciones y multiplicidades, está documentado en el informe final del proyecto (diagrama entidad-relación y diagrama de clases UML).
+| **Informe final del proyecto** | https://github.com/NicolasRaza/TP-IA-UTN-BiblioTech-Informe |
 
 ## Stack tecnológico
 
@@ -93,6 +70,14 @@ Módulos conectados de punta a punta (backend ↔ frontend ↔ base de datos rea
 
 En desarrollo activo: enriquecimiento de las respuestas de circulación (algunos campos derivados se están completando en distintas rutas), y el flujo de activación de cuentas de lector recién creadas.
 
+## Documentación completa
+
+Arquitectura detallada, diagramas (ERD, UML), evaluación de UX/UI y ciberseguridad, y evidencia de funcionamiento están en el [informe final del proyecto](https://github.com/NicolasRaza/TP-IA-UTN-BiblioTech-Informe).
+
+## Contribuir
+
+¿Vas a tocar código? Mirá [CONTRIBUTING.md](./CONTRIBUTING.md) antes de abrir un PR.
+
 ## Equipo
 
-Ver detalle de roles en el informe final del proyecto.
+Ver detalle de roles en el [informe final del proyecto](https://github.com/NicolasRaza/TP-IA-UTN-BiblioTech-Informe).
